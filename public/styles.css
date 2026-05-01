@@ -247,10 +247,38 @@ p { color: var(--muted); }
 
 .app-main {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 16px;
   min-width: 0;
   padding: 18px;
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.app-footer a {
+  color: var(--accent);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
+}
+
+.login-card-footer {
+  justify-content: flex-start;
+  min-height: auto;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 .topbar {
@@ -733,7 +761,10 @@ dialog::backdrop { background: rgba(20, 31, 42, .45); }
 .submit-shell {
   min-height: 100vh;
   display: grid;
-  place-items: center;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  align-items: center;
+  gap: 16px;
   padding: 30px 16px;
   background:
     linear-gradient(180deg, #eef8f8 0%, #f7f9fb 46%, #f7f9fb 100%);
@@ -756,6 +787,16 @@ dialog::backdrop { background: rgba(20, 31, 42, .45); }
 .submit-hero p { color: #d5eeee; }
 
 .submit-form { padding: 22px 26px 26px; }
+
+.submit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.submit-footer {
+  width: min(720px, 100%);
+}
 
 .upload-zone {
   display: grid;
@@ -786,13 +827,172 @@ progress {
 
   .task-list {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    max-height: 260px;
   }
 }
 
 @media (max-width: 760px) {
-  .app-main, .app-sidebar { padding: 12px; }
-  .topbar, .panel-head, .share-panel { display: grid; grid-template-columns: 1fr; }
-  .summary-grid, .form-row, .form-row.three, .field-top, .field-bottom, .file-card, .file-row { grid-template-columns: 1fr; }
-  .top-actions, .table-tools, .share-row, .drawer-actions { align-items: stretch; }
-  .table-tools input { width: 100%; }
+  body { font-size: 14px; }
+  h1 { font-size: 20px; }
+
+  .toast-host {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+
+  .login-screen { padding: 14px; }
+  .login-card { padding: 20px; }
+
+  .app-main,
+  .app-sidebar {
+    padding: 12px;
+  }
+
+  .app-sidebar {
+    gap: 10px;
+  }
+
+  .brand {
+    padding-bottom: 10px;
+  }
+
+  .task-list {
+    max-height: 220px;
+  }
+
+  .topbar,
+  .panel-head,
+  .share-panel {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .topbar,
+  .panel-head,
+  .share-panel,
+  .metric,
+  .side-block {
+    padding: 12px;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric b {
+    font-size: 24px;
+  }
+
+  .form-row,
+  .form-row.three,
+  .field-top,
+  .field-bottom,
+  .file-card,
+  .file-row {
+    grid-template-columns: 1fr;
+  }
+
+  .top-actions,
+  .table-tools,
+  .share-row,
+  .drawer-actions,
+  .dialog-actions,
+  .submit-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .top-actions .admin-badge {
+    justify-content: center;
+  }
+
+  .table-tools input,
+  .share-row input,
+  .field-tools select {
+    width: 100%;
+  }
+
+  .field-tools {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .field-tools select {
+    grid-column: 1 / -1;
+  }
+
+  .empty-dashboard {
+    min-height: 320px;
+    padding: 20px;
+  }
+
+  .editor-drawer {
+    width: 100vw;
+    padding: 14px;
+  }
+
+  .drawer-actions {
+    padding-bottom: 10px;
+  }
+
+  dialog,
+  dialog.wide-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    padding: 14px;
+    overflow: auto;
+  }
+
+  #qrImage {
+    width: min(240px, 72vw);
+    height: min(240px, 72vw);
+  }
+
+  .file-manager {
+    max-height: calc(100vh - 210px);
+  }
+
+  table {
+    min-width: 680px;
+  }
+
+  th, td {
+    padding: 9px 10px;
+  }
+
+  .submit-shell {
+    min-height: 100dvh;
+    padding: 14px;
+  }
+
+  .submit-card {
+    align-self: end;
+  }
+
+  .submit-hero,
+  .submit-form {
+    padding: 18px;
+  }
+
+  .upload-zone {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 430px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .file-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
 }
