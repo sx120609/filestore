@@ -504,6 +504,12 @@ p { color: var(--muted); }
   background: var(--surface);
 }
 
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .table-wrap {
   height: 100%;
   overflow: auto;

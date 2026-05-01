@@ -4,6 +4,7 @@ const state = {
   detail: null,
   mode: "create",
   identifierType: "student",
+  settings: { siteUrl: "" },
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -45,7 +46,8 @@ function setAuthed(isAuthed) {
 
 async function checkSession() {
   try {
-    await api("/api/admin/me");
+    const session = await api("/api/admin/me");
+    state.settings = session.settings || { siteUrl: "" };
     setAuthed(true);
     await loadTasks();
   } catch {
@@ -62,6 +64,7 @@ async function login(password) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "登录失败");
+  state.settings = payload.settings || { siteUrl: "" };
   setAuthed(true);
   await loadTasks();
 }
@@ -92,7 +95,9 @@ function localDateTime(iso) {
 }
 
 function absoluteSubmitUrl(task) {
-  return task ? `${location.origin}${task.submitUrl}` : "";
+  if (!task) return "";
+  const base = (state.settings.siteUrl || location.origin).replace(/\/+$/, "");
+  return `${base}${task.submitUrl}`;
 }
 
 function defaultFields(identifierType = state.identifierType) {
@@ -215,6 +220,16 @@ async function loadTasks() {
   } catch (error) {
     $("#taskList").innerHTML = `<p class="message error">${escapeHtml(error.message)}</p>`;
   }
+}
+
+async function saveSettings(siteUrl) {
+  const settings = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({ siteUrl }),
+  });
+  state.settings = settings;
+  if (state.current) renderDetail(state.current);
+  return settings;
 }
 
 function renderTaskList() {
@@ -522,6 +537,28 @@ function bind() {
     }
   });
   $("#logout").addEventListener("click", logout);
+  $("#openSettings").addEventListener("click", () => {
+    $("#siteUrl").value = state.settings.siteUrl || "";
+    $("#settingsMessage").textContent = "";
+    $("#settingsDialog").showModal();
+  });
+  $("#closeSettings").addEventListener("click", () => $("#settingsDialog").close());
+  $("#clearSiteUrl").addEventListener("click", () => {
+    $("#siteUrl").value = "";
+  });
+  $("#saveSettings").addEventListener("click", async () => {
+    $("#settingsMessage").textContent = "正在保存...";
+    $("#settingsMessage").className = "message";
+    try {
+      const settings = await saveSettings($("#siteUrl").value);
+      $("#siteUrl").value = settings.siteUrl || "";
+      $("#settingsMessage").textContent = "设置已保存";
+      $("#settingsMessage").className = "message ok";
+    } catch (error) {
+      $("#settingsMessage").textContent = error.message;
+      $("#settingsMessage").className = "message error";
+    }
+  });
   $("#newTask").addEventListener("click", () => openEditor(null));
   $("#emptyNewTask").addEventListener("click", () => openEditor(null));
   $("#editTask").addEventListener("click", () => openEditor(state.current));

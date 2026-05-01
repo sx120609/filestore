@@ -536,7 +536,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 SESSIONS.add(session)
                 send_json(
                     self,
-                    {"ok": True, "role": "admin"},
+                    {"ok": True, "role": "admin", "settings": app_settings()},
                     extra_headers={
                         "Set-Cookie": f"filestore_session={session}; Path=/; HttpOnly; SameSite=Lax"
                     },
