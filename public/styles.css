@@ -542,6 +542,12 @@ p { color: var(--muted); }
   justify-content: flex-end;
 }
 
+.settings-divider {
+  height: 1px;
+  margin: 18px 0 14px;
+  background: var(--line);
+}
+
 .table-wrap {
   height: 100%;
   overflow: auto;

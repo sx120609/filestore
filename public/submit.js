@@ -19,6 +19,7 @@ function message(text, type = "") {
 
 function renderTask() {
   const isClosed = task.status !== "open";
+  document.title = `${task.siteTitle || "Filestore"} - ${task.title}`;
   $("#submitHeader").innerHTML = `
     <p class="eyebrow">${isClosed ? "CLOSED" : "FILE SUBMISSION"}</p>
     <h1>${escapeHtml(task.title)}</h1>

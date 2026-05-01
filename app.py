@@ -132,6 +132,10 @@ def get_setting(key: str, default: str = "") -> str:
     return row["value"] if row else default
 
 
+def admin_password() -> str:
+    return get_setting("admin_password", ADMIN_PASSWORD)
+
+
 def set_setting(key: str, value: str) -> None:
     with connect() as conn:
         conn.execute(
@@ -165,7 +169,11 @@ def app_settings() -> dict:
         legacy_template["id"] = "legacy-template"
         legacy_template["name"] = "已保存模板"
         templates = [legacy_template]
-    return {"siteUrl": get_setting("site_url"), "taskTemplates": templates}
+    return {
+        "siteUrl": get_setting("site_url"),
+        "siteTitle": get_setting("site_title", "Filestore"),
+        "taskTemplates": templates,
+    }
 
 
 def validate_task_template(template: dict) -> dict:
@@ -528,6 +536,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 send_json(self, {"error": "提交链接不存在"}, HTTPStatus.NOT_FOUND)
                 return
             public_task = {key: task[key] for key in ["title", "description", "deadline", "fields", "fileRules", "status"]}
+            public_task["siteTitle"] = get_setting("site_title", "Filestore")
             send_json(self, public_task)
             return
         match = re.fullmatch(r"/api/tasks/(\d+)/export.csv", path)
@@ -565,7 +574,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         if path == "/api/admin/login":
             payload = read_json_body(self)
-            if secrets.compare_digest(str(payload.get("password", "")), ADMIN_PASSWORD):
+            if secrets.compare_digest(str(payload.get("password", "")), admin_password()):
                 session = secrets.token_urlsafe(32)
                 SESSIONS.add(session)
                 send_json(
@@ -577,6 +586,28 @@ class AppHandler(SimpleHTTPRequestHandler):
                 )
             else:
                 send_json(self, {"error": "管理员密码错误"}, HTTPStatus.UNAUTHORIZED)
+            return
+        if path == "/api/admin/password":
+            if not require_admin(self):
+                return
+            payload = read_json_body(self)
+            current = str(payload.get("currentPassword", ""))
+            new_password = str(payload.get("newPassword", ""))
+            if not secrets.compare_digest(current, admin_password()):
+                send_json(self, {"error": "当前密码错误"}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(new_password) < 6:
+                send_json(self, {"error": "新密码至少需要 6 位"}, HTTPStatus.BAD_REQUEST)
+                return
+            set_setting("admin_password", new_password)
+            SESSIONS.clear()
+            send_json(
+                self,
+                {"ok": True},
+                extra_headers={
+                    "Set-Cookie": "filestore_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+                },
+            )
             return
         if path == "/api/admin/logout":
             session = current_session(self)
@@ -596,6 +627,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             try:
                 payload = read_json_body(self)
                 site_url = normalize_site_url(str(payload.get("siteUrl", "")))
+                site_title = str(payload.get("siteTitle", "Filestore")).strip()[:60] or "Filestore"
                 templates_value = None
                 should_update_templates = "taskTemplates" in payload
                 if should_update_templates:
@@ -610,6 +642,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             set_setting("site_url", site_url)
+            set_setting("site_title", site_title)
             if should_update_templates:
                 set_setting("task_templates", templates_value or "[]")
                 set_setting("task_template", "")
