@@ -3,16 +3,32 @@ const state = {
   current: null,
   detail: null,
   mode: "create",
-  identifierType: "student",
-  settings: { siteUrl: "" },
+  templateKey: "builtin:student",
+  settings: { siteUrl: "", taskTemplates: [] },
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
-const identifierRules = {
-  student: { label: "学号", pattern: "^2020\\d{6}$", placeholder: "例如 2020240444" },
-  exam: { label: "考试号", pattern: "^24201505\\d{2}$", placeholder: "例如 2420150508" },
+const builtInTemplates = {
+  "builtin:student": {
+    name: "学号模板",
+    fields: [
+      { label: "姓名", key: "name", required: true, pattern: "^[\\u4e00-\\u9fa5·]{2,20}$", placeholder: "请输入中文姓名" },
+      { label: "学号", key: "student_id", required: true, pattern: "^2020\\d{6}$", placeholder: "例如 2020240444" },
+    ],
+    fileRules: { allowedTypes: ["pdf", "doc", "docx", "jpg", "png", "zip"], maxSizeMb: 20, maxCount: 1 },
+    renameTemplate: "{name}-{student_id}",
+  },
+  "builtin:exam": {
+    name: "考试号模板",
+    fields: [
+      { label: "姓名", key: "name", required: true, pattern: "^[\\u4e00-\\u9fa5·]{2,20}$", placeholder: "请输入中文姓名" },
+      { label: "考试号", key: "student_id", required: true, pattern: "^24201505\\d{2}$", placeholder: "例如 2420150508" },
+    ],
+    fileRules: { allowedTypes: ["pdf", "doc", "docx", "jpg", "png", "zip"], maxSizeMb: 20, maxCount: 1 },
+    renameTemplate: "{name}-{student_id}",
+  },
 };
 
 window.addEventListener("error", (event) => {
@@ -55,7 +71,8 @@ function setAuthed(isAuthed) {
 async function checkSession() {
   try {
     const session = await api("/api/admin/me");
-    state.settings = session.settings || { siteUrl: "" };
+    state.settings = normalizeSettings(session.settings);
+    renderTemplateSelect(state.templateKey);
     setAuthed(true);
     await loadTasks();
   } catch {
@@ -72,7 +89,8 @@ async function login(password) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "登录失败");
-  state.settings = payload.settings || { siteUrl: "" };
+  state.settings = normalizeSettings(payload.settings);
+  renderTemplateSelect(state.templateKey);
   setAuthed(true);
   await loadTasks();
 }
@@ -140,6 +158,46 @@ function confirmInApp({ title = "确认操作", body = "", okText = "确认", da
   });
 }
 
+function promptInApp({ title = "输入名称", body = "", label = "名称", value = "", okText = "保存" } = {}) {
+  return new Promise((resolve) => {
+    const dialog = $("#promptDialog");
+    $("#promptTitle").textContent = title;
+    $("#promptBody").textContent = body;
+    $("#promptLabel").firstChild.textContent = label;
+    $("#promptInput").value = value;
+    $("#promptOk").textContent = okText;
+
+    const cleanup = (result) => {
+      $("#promptOk").onclick = null;
+      $("#promptCancel").onclick = null;
+      dialog.onclose = null;
+      if (dialog.open) dialog.close();
+      resolve(result);
+    };
+
+    $("#promptOk").onclick = () => cleanup($("#promptInput").value.trim());
+    $("#promptCancel").onclick = () => cleanup(null);
+    dialog.onclose = () => cleanup(null);
+    dialog.showModal();
+    $("#promptInput").focus();
+  });
+}
+
+function normalizeSettings(settings = {}) {
+  return {
+    siteUrl: settings.siteUrl || "",
+    taskTemplates: Array.isArray(settings.taskTemplates) ? settings.taskTemplates : [],
+  };
+}
+
+function normalizeAllowedTypes(value) {
+  if (Array.isArray(value)) return value;
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function localDateTime(iso) {
   if (!iso) return "";
   const date = new Date(iso);
@@ -153,12 +211,35 @@ function absoluteSubmitUrl(task) {
   return `${base}${task.submitUrl}`;
 }
 
-function defaultFields(identifierType = state.identifierType) {
-  const identifier = identifierRules[identifierType] || identifierRules.student;
+function defaultTemplate() {
+  return builtInTemplates["builtin:student"];
+}
+
+function defaultFields() {
+  return defaultTemplate().fields;
+}
+
+function currentTemplateOptions() {
   return [
-    { label: "姓名", key: "name", required: true, pattern: "^[\\u4e00-\\u9fa5·]{2,20}$", placeholder: "请输入中文姓名" },
-    { label: identifier.label, key: "student_id", required: true, pattern: identifier.pattern, placeholder: identifier.placeholder },
+    ...Object.entries(builtInTemplates).map(([key, template]) => ({ key, template, builtin: true })),
+    ...state.settings.taskTemplates.map((template) => ({ key: `custom:${template.id}`, template, builtin: false })),
   ];
+}
+
+function selectedTemplate() {
+  const key = $("#templateSelect").value || state.templateKey;
+  return currentTemplateOptions().find((item) => item.key === key);
+}
+
+function renderTemplateSelect(selectedKey = state.templateKey) {
+  const options = currentTemplateOptions();
+  $("#templateSelect").innerHTML = options.map((item) => `
+    <option value="${escapeHtml(item.key)}">${item.builtin ? "内置：" : "自定义："}${escapeHtml(item.template.name)}</option>
+  `).join("");
+  const hasSelected = options.some((item) => item.key === selectedKey);
+  state.templateKey = hasSelected ? selectedKey : "builtin:student";
+  $("#templateSelect").value = state.templateKey;
+  $("#deleteTemplate").disabled = state.templateKey.startsWith("builtin:");
 }
 
 function addField(field = {}) {
@@ -185,9 +266,14 @@ function setFields(fields) {
   fields.forEach(addField);
 }
 
-function applyIdentifierTemplate() {
-  setFields(defaultFields($("#identifierType").value));
-  state.identifierType = $("#identifierType").value;
+function applyTemplate(template = selectedTemplate()?.template) {
+  if (!template) throw new Error("请选择模板");
+  setFields(template.fields || defaultFields());
+  $("#allowedTypes").value = normalizeAllowedTypes(template.fileRules?.allowedTypes).join(",") || "pdf,doc,docx,jpg,png,zip";
+  $("#maxSizeMb").value = template.fileRules?.maxSizeMb || 20;
+  $("#maxCount").value = template.fileRules?.maxCount || 1;
+  $("#renameTemplate").value = template.renameTemplate || "{name}-{student_id}";
+  toast("模板已应用", "ok");
 }
 
 function collectFields() {
@@ -222,25 +308,23 @@ function templatePayload() {
   const payload = editorPayload();
   return {
     fields: payload.fields,
-    fileRules: payload.fileRules,
+    fileRules: {
+      allowedTypes: normalizeAllowedTypes(payload.fileRules.allowedTypes),
+      maxSizeMb: Number(payload.fileRules.maxSizeMb || 20),
+      maxCount: Number(payload.fileRules.maxCount || 1),
+    },
     renameTemplate: payload.renameTemplate,
   };
 }
 
-function inferIdentifierType(fields) {
-  const identifier = fields.find((field) => field.key === "student_id");
-  state.identifierType = identifier?.label === "考试号" || identifier?.pattern === identifierRules.exam.pattern ? "exam" : "student";
-  $("#identifierType").value = state.identifierType;
-}
-
 function fillEditor(task) {
   $("#editorTitle").textContent = task ? "编辑任务" : "新建任务";
-  inferIdentifierType(task?.fields || []);
+  renderTemplateSelect(state.templateKey);
   $("#title").value = task?.title || "";
   $("#description").value = task?.description || "";
   $("#deadline").value = localDateTime(task?.deadline);
   $("#taskStatus").value = task?.status || "open";
-  $("#allowedTypes").value = task?.fileRules?.allowedTypes?.join(",") || "pdf,doc,docx,jpg,png,zip";
+  $("#allowedTypes").value = normalizeAllowedTypes(task?.fileRules?.allowedTypes || defaultTemplate().fileRules.allowedTypes).join(",");
   $("#maxSizeMb").value = task?.fileRules?.maxSizeMb || 20;
   $("#maxCount").value = task?.fileRules?.maxCount || 1;
   $("#renameTemplate").value = task?.renameTemplate || "{name}-{student_id}";
@@ -294,36 +378,73 @@ async function saveSettings(siteUrl) {
     method: "POST",
     body: JSON.stringify({ siteUrl }),
   });
-  state.settings = settings;
+  state.settings = normalizeSettings(settings);
+  renderTemplateSelect(state.templateKey);
   if (state.current) renderDetail(state.current);
   return settings;
 }
 
 async function saveTemplate() {
+  const name = await promptInApp({
+    title: "保存当前模板",
+    body: "输入模板名称，保存后会出现在模板下拉列表中。",
+    label: "模板名称",
+    okText: "保存模板",
+  });
+  if (!name) return;
+  const existing = state.settings.taskTemplates.find((item) => item.name === name);
+  let templates = state.settings.taskTemplates;
+  if (existing) {
+    const ok = await confirmInApp({
+      title: "覆盖模板",
+      body: `已存在名为「${name}」的模板，是否覆盖？`,
+      okText: "覆盖",
+      danger: false,
+    });
+    if (!ok) return;
+    templates = templates.filter((item) => item.id !== existing.id);
+  }
+  const template = {
+    id: existing?.id || `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    ...templatePayload(),
+  };
   const settings = await api("/api/settings", {
     method: "POST",
     body: JSON.stringify({
       siteUrl: state.settings.siteUrl || "",
-      taskTemplate: templatePayload(),
+      taskTemplates: [...templates, template],
     }),
   });
-  state.settings = settings;
-  toast("当前模板已保存", "ok");
+  state.settings = normalizeSettings(settings);
+  renderTemplateSelect(`custom:${template.id}`);
+  toast(`模板「${name}」已保存`, "ok");
 }
 
-function applySavedTemplate() {
-  const template = state.settings.taskTemplate;
-  if (!template) {
-    toast("还没有保存过模板", "error");
+async function deleteSelectedTemplate() {
+  const selected = selectedTemplate();
+  if (!selected) throw new Error("请选择模板");
+  if (selected.builtin) {
+    toast("内置模板不能删除", "error");
     return;
   }
-  setFields(template.fields || defaultFields());
-  $("#allowedTypes").value = template.fileRules?.allowedTypes?.join(",") || "pdf,doc,docx,jpg,png,zip";
-  $("#maxSizeMb").value = template.fileRules?.maxSizeMb || 20;
-  $("#maxCount").value = template.fileRules?.maxCount || 1;
-  $("#renameTemplate").value = template.renameTemplate || "{name}-{student_id}";
-  inferIdentifierType(template.fields || []);
-  toast("已应用保存的模板", "ok");
+  const ok = await confirmInApp({
+    title: "删除模板",
+    body: `删除自定义模板「${selected.template.name}」？`,
+    okText: "删除模板",
+  });
+  if (!ok) return;
+  const templates = state.settings.taskTemplates.filter((item) => item.id !== selected.template.id);
+  const settings = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({
+      siteUrl: state.settings.siteUrl || "",
+      taskTemplates: templates,
+    }),
+  });
+  state.settings = normalizeSettings(settings);
+  renderTemplateSelect("builtin:student");
+  toast("模板已删除", "ok");
 }
 
 function renderTaskList() {
@@ -413,7 +534,7 @@ function renderRules(task) {
   const rules = task.fileRules;
   $("#ruleList").innerHTML = `
     <dt>字段</dt><dd>${task.fields.map((field) => escapeHtml(field.label)).join("、")}</dd>
-    <dt>文件类型</dt><dd>${rules.allowedTypes.join(", ") || "不限"}</dd>
+    <dt>文件类型</dt><dd>${normalizeAllowedTypes(rules.allowedTypes).join(", ") || "不限"}</dd>
     <dt>大小/数量</dt><dd>${rules.maxSizeMb} MB · 最多 ${rules.maxCount} 个</dd>
     <dt>命名</dt><dd>${escapeHtml(task.renameTemplate)}</dd>
     <dt>截止</dt><dd>${task.deadline ? new Date(task.deadline).toLocaleString() : "未设置"}</dd>
@@ -678,11 +799,12 @@ function bind() {
   $("#taskSearch").addEventListener("input", renderTaskList);
   $("#submissionSearch").addEventListener("input", renderSubmissionTable);
   $("#addField").addEventListener("click", safe(() => addField({ required: true })));
-  $("#identifierType").addEventListener("change", () => {
-    applyIdentifierTemplate();
+  $("#templateSelect").addEventListener("change", () => {
+    state.templateKey = $("#templateSelect").value;
+    $("#deleteTemplate").disabled = state.templateKey.startsWith("builtin:");
   });
-  $("[data-preset='student']").addEventListener("click", safe(applyIdentifierTemplate));
-  $("#applySavedTemplate").addEventListener("click", safe(applySavedTemplate));
+  $("#applyTemplate").addEventListener("click", safe(() => applyTemplate()));
+  $("#deleteTemplate").addEventListener("click", safe(deleteSelectedTemplate));
   $("#saveTask").addEventListener("click", safe(saveTask));
   $("#saveTemplate").addEventListener("click", safe(saveTemplate));
   $("#resetEditor").addEventListener("click", safe(() => fillEditor(state.mode === "edit" ? state.current : null)));

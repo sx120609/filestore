@@ -144,12 +144,9 @@
       <div class="section-line">
         <h3>表单字段</h3>
         <div class="field-tools">
-          <select id="identifierType" title="编号类型">
-            <option value="student">学号</option>
-            <option value="exam">考试号</option>
-          </select>
-          <button class="chip" data-preset="student">应用模板</button>
-          <button id="applySavedTemplate" class="chip">应用已保存模板</button>
+          <select id="templateSelect" title="选择模板"></select>
+          <button id="applyTemplate" class="chip">应用模板</button>
+          <button id="deleteTemplate" class="chip danger">删除模板</button>
           <button id="addField" class="chip">添加字段</button>
         </div>
       </div>
@@ -234,6 +231,22 @@
     <div class="dialog-actions">
       <button id="confirmOk" class="danger">确认</button>
       <button id="confirmCancel">取消</button>
+    </div>
+  </dialog>
+
+  <dialog id="promptDialog">
+    <div class="dialog-head">
+      <div>
+        <h2 id="promptTitle">输入名称</h2>
+        <p id="promptBody" class="hint"></p>
+      </div>
+    </div>
+    <label id="promptLabel">名称
+      <input id="promptInput">
+    </label>
+    <div class="dialog-actions">
+      <button id="promptOk" class="primary">保存</button>
+      <button id="promptCancel">取消</button>
     </div>
   </dialog>
 

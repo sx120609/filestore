@@ -480,7 +480,7 @@ p { color: var(--muted); }
 }
 
 .field-tools select {
-  width: 96px;
+  width: 172px;
   min-height: 30px;
   padding: 5px 8px;
   font-size: 12px;

@@ -158,8 +158,36 @@ def normalize_site_url(value: str) -> str:
 
 def app_settings() -> dict:
     raw_template = get_setting("task_template")
-    template = json.loads(raw_template) if raw_template else None
-    return {"siteUrl": get_setting("site_url"), "taskTemplate": template}
+    legacy_template = json.loads(raw_template) if raw_template else None
+    raw_templates = get_setting("task_templates")
+    templates = json.loads(raw_templates) if raw_templates else []
+    if legacy_template and not templates:
+        legacy_template["id"] = "legacy-template"
+        legacy_template["name"] = "已保存模板"
+        templates = [legacy_template]
+    return {"siteUrl": get_setting("site_url"), "taskTemplates": templates}
+
+
+def validate_task_template(template: dict) -> dict:
+    fields = template.get("fields") or []
+    if not isinstance(fields, list) or not fields:
+        raise ValueError("模板至少需要一个字段")
+    normalized = normalize_task_payload(
+        {
+            "title": "template",
+            "fields": fields,
+            "fileRules": template.get("fileRules") or {},
+            "renameTemplate": template.get("renameTemplate", "{name}-{student_id}"),
+            "expectedEntries": "",
+        }
+    )
+    return {
+        "id": str(template.get("id") or secrets.token_urlsafe(8)),
+        "name": str(template.get("name") or "未命名模板").strip()[:40] or "未命名模板",
+        "fields": normalized["fields"],
+        "fileRules": normalized["fileRules"],
+        "renameTemplate": normalized["renameTemplate"],
+    }
 
 
 def cookie_value(handler: SimpleHTTPRequestHandler, name: str) -> str:
@@ -241,7 +269,11 @@ def normalize_task_payload(payload: dict) -> dict:
         )
 
     rules = payload.get("fileRules") or {}
-    allowed_types = [item.strip().lower() for item in str(rules.get("allowedTypes", "")).split(",") if item.strip()]
+    raw_allowed_types = rules.get("allowedTypes", "")
+    if isinstance(raw_allowed_types, list):
+        allowed_types = [str(item).strip().lower() for item in raw_allowed_types if str(item).strip()]
+    else:
+        allowed_types = [item.strip().lower() for item in str(raw_allowed_types).split(",") if item.strip()]
     max_size_mb = float(rules.get("maxSizeMb") or 20)
     max_count = int(rules.get("maxCount") or 1)
     if max_size_mb <= 0 or max_count <= 0:
@@ -564,30 +596,23 @@ class AppHandler(SimpleHTTPRequestHandler):
             try:
                 payload = read_json_body(self)
                 site_url = normalize_site_url(str(payload.get("siteUrl", "")))
-                template_value = None
-                should_update_template = "taskTemplate" in payload
-                if should_update_template:
-                    template = payload.get("taskTemplate")
-                    if template is not None:
-                        fields = template.get("fields") or []
-                        if not isinstance(fields, list) or not fields:
-                            raise ValueError("模板至少需要一个字段")
-                        normalize_task_payload(
-                            {
-                                "title": "template",
-                                "fields": fields,
-                                "fileRules": template.get("fileRules") or {},
-                                "renameTemplate": template.get("renameTemplate", "{name}-{student_id}"),
-                                "expectedEntries": "",
-                            }
-                        )
-                        template_value = json.dumps(template, ensure_ascii=False)
+                templates_value = None
+                should_update_templates = "taskTemplates" in payload
+                if should_update_templates:
+                    templates = payload.get("taskTemplates") or []
+                    if not isinstance(templates, list):
+                        raise ValueError("模板数据格式不正确")
+                    templates_value = json.dumps(
+                        [validate_task_template(item) for item in templates],
+                        ensure_ascii=False,
+                    )
             except Exception as exc:
                 send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             set_setting("site_url", site_url)
-            if should_update_template:
-                set_setting("task_template", template_value or "")
+            if should_update_templates:
+                set_setting("task_templates", templates_value or "[]")
+                set_setting("task_template", "")
             send_json(self, app_settings())
             return
         if path == "/api/tasks":
