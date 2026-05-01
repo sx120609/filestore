@@ -76,7 +76,11 @@ body.auth-pending .drawer-scrim {
   display: none;
 }
 
-button, input, textarea, select { font: inherit; }
+button, input, textarea, select {
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+}
 
 button {
   min-height: 36px;
@@ -112,6 +116,7 @@ textarea { min-height: 86px; resize: vertical; }
 label {
   display: grid;
   gap: 6px;
+  min-width: 0;
   margin-bottom: 12px;
   color: #334252;
   font-size: 13px;
@@ -465,9 +470,13 @@ p { color: var(--muted); }
   right: 0;
   z-index: 30;
   width: min(560px, 100vw);
+  max-width: 100vw;
   height: 100vh;
   padding: 18px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   background: var(--surface);
   border-left: 1px solid var(--line);
   transform: translateX(100%);
@@ -492,6 +501,7 @@ p { color: var(--muted); }
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
 }
 
 .drawer-head {
@@ -518,6 +528,7 @@ p { color: var(--muted); }
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .field-tools select {
@@ -539,6 +550,9 @@ p { color: var(--muted); }
 .field-card {
   display: grid;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   padding: 10px;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -572,6 +586,9 @@ p { color: var(--muted); }
   bottom: 0;
   display: flex;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   padding: 12px 0 0;
   background: var(--surface);
 }
@@ -967,7 +984,22 @@ progress {
 
   .editor-drawer {
     width: 100vw;
+    max-width: 100vw;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     padding: 14px;
+  }
+
+  .drawer-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .section-line {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .drawer-actions {
