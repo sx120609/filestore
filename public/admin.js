@@ -799,6 +799,11 @@ async function copyText(text, done = "已复制") {
   toast(done, "ok");
 }
 
+function missingClipboardText() {
+  const missing = state.detail?.stats?.missing || [];
+  return missing.map((item, index) => `${index + 1}. ${item}`).join("\r\n");
+}
+
 function bind() {
   $("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -863,7 +868,7 @@ function bind() {
   $("#deleteTask").addEventListener("click", safe(deleteTask));
   $("#copyLink").addEventListener("click", safe(() => copyText(absoluteSubmitUrl(state.current), "提交链接已复制")));
   $("#copyLinkInline").addEventListener("click", safe(() => copyText(absoluteSubmitUrl(state.current), "提交链接已复制")));
-  $("#copyMissing").addEventListener("click", safe(() => copyText(state.detail.stats.missing.join("\n"), "缺交名单已复制")));
+  $("#copyMissing").addEventListener("click", safe(() => copyText(missingClipboardText(), "缺交名单已复制")));
   $("#showQr").addEventListener("click", safe(() => {
     const url = absoluteSubmitUrl(state.current);
     if (!url) throw new Error("请先选择任务");
