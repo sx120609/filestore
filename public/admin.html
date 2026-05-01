@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="admin-body auth-pending">
+  <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
   <section id="loginScreen" class="login-screen">
     <form id="loginForm" class="login-card">
       <div class="login-brand">
@@ -146,7 +148,8 @@
             <option value="student">学号</option>
             <option value="exam">考试号</option>
           </select>
-          <button class="chip" data-preset="student">学生模板</button>
+          <button class="chip" data-preset="student">应用模板</button>
+          <button id="applySavedTemplate" class="chip">应用已保存模板</button>
           <button id="addField" class="chip">添加字段</button>
         </div>
       </div>
@@ -171,6 +174,7 @@
 
     <div class="drawer-actions">
       <button id="saveTask" class="primary">保存任务</button>
+      <button id="saveTemplate">保存当前模板</button>
       <button id="resetEditor">重置</button>
       <button id="deleteTask" class="danger" disabled>删除任务</button>
     </div>
@@ -218,6 +222,19 @@
       <button id="clearSiteUrl">清空</button>
     </div>
     <p id="settingsMessage" class="message"></p>
+  </dialog>
+
+  <dialog id="confirmDialog">
+    <div class="dialog-head">
+      <div>
+        <h2 id="confirmTitle">确认操作</h2>
+        <p id="confirmBody" class="hint"></p>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button id="confirmOk" class="danger">确认</button>
+      <button id="confirmCancel">取消</button>
+    </div>
   </dialog>
 
   <script src="/admin.js"></script>

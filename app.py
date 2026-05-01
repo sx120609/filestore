@@ -157,7 +157,9 @@ def normalize_site_url(value: str) -> str:
 
 
 def app_settings() -> dict:
-    return {"siteUrl": get_setting("site_url")}
+    raw_template = get_setting("task_template")
+    template = json.loads(raw_template) if raw_template else None
+    return {"siteUrl": get_setting("site_url"), "taskTemplate": template}
 
 
 def cookie_value(handler: SimpleHTTPRequestHandler, name: str) -> str:
@@ -562,10 +564,30 @@ class AppHandler(SimpleHTTPRequestHandler):
             try:
                 payload = read_json_body(self)
                 site_url = normalize_site_url(str(payload.get("siteUrl", "")))
+                template_value = None
+                should_update_template = "taskTemplate" in payload
+                if should_update_template:
+                    template = payload.get("taskTemplate")
+                    if template is not None:
+                        fields = template.get("fields") or []
+                        if not isinstance(fields, list) or not fields:
+                            raise ValueError("模板至少需要一个字段")
+                        normalize_task_payload(
+                            {
+                                "title": "template",
+                                "fields": fields,
+                                "fileRules": template.get("fileRules") or {},
+                                "renameTemplate": template.get("renameTemplate", "{name}-{student_id}"),
+                                "expectedEntries": "",
+                            }
+                        )
+                        template_value = json.dumps(template, ensure_ascii=False)
             except Exception as exc:
                 send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             set_setting("site_url", site_url)
+            if should_update_template:
+                set_setting("task_template", template_value or "")
             send_json(self, app_settings())
             return
         if path == "/api/tasks":

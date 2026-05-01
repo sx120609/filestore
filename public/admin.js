@@ -15,6 +15,14 @@ const identifierRules = {
   exam: { label: "考试号", pattern: "^24201505\\d{2}$", placeholder: "例如 2420150508" },
 };
 
+window.addEventListener("error", (event) => {
+  reportError(event.error || new Error(event.message));
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  reportError(event.reason || new Error("操作失败"));
+});
+
 function escapeHtml(value = "") {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -83,8 +91,53 @@ async function logout() {
 }
 
 function toast(text, type = "") {
-  $("#createMessage").textContent = text;
-  $("#createMessage").className = `message ${type}`;
+  const inline = $("#createMessage");
+  if (inline) {
+    inline.textContent = text;
+    inline.className = `message ${type}`;
+  }
+  const item = document.createElement("div");
+  item.className = `toast ${type}`;
+  item.textContent = text;
+  $("#toastHost").appendChild(item);
+  setTimeout(() => item.remove(), type === "error" ? 5200 : 2800);
+}
+
+function reportError(error, fallback = "操作失败") {
+  toast(error?.message || fallback, "error");
+}
+
+function safe(handler) {
+  return async (event) => {
+    try {
+      await handler(event);
+    } catch (error) {
+      reportError(error);
+    }
+  };
+}
+
+function confirmInApp({ title = "确认操作", body = "", okText = "确认", danger = true } = {}) {
+  return new Promise((resolve) => {
+    const dialog = $("#confirmDialog");
+    $("#confirmTitle").textContent = title;
+    $("#confirmBody").textContent = body;
+    $("#confirmOk").textContent = okText;
+    $("#confirmOk").className = danger ? "danger" : "primary";
+
+    const cleanup = (value) => {
+      $("#confirmOk").onclick = null;
+      $("#confirmCancel").onclick = null;
+      dialog.onclose = null;
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+
+    $("#confirmOk").onclick = () => cleanup(true);
+    $("#confirmCancel").onclick = () => cleanup(false);
+    dialog.onclose = () => cleanup(false);
+    dialog.showModal();
+  });
 }
 
 function localDateTime(iso) {
@@ -132,6 +185,11 @@ function setFields(fields) {
   fields.forEach(addField);
 }
 
+function applyIdentifierTemplate() {
+  setFields(defaultFields($("#identifierType").value));
+  state.identifierType = $("#identifierType").value;
+}
+
 function collectFields() {
   return $$(".field-card").map((row) => ({
     label: row.querySelector(".field-label").value.trim(),
@@ -160,6 +218,15 @@ function editorPayload() {
   };
 }
 
+function templatePayload() {
+  const payload = editorPayload();
+  return {
+    fields: payload.fields,
+    fileRules: payload.fileRules,
+    renameTemplate: payload.renameTemplate,
+  };
+}
+
 function inferIdentifierType(fields) {
   const identifier = fields.find((field) => field.key === "student_id");
   state.identifierType = identifier?.label === "考试号" || identifier?.pattern === identifierRules.exam.pattern ? "exam" : "student";
@@ -168,6 +235,7 @@ function inferIdentifierType(fields) {
 
 function fillEditor(task) {
   $("#editorTitle").textContent = task ? "编辑任务" : "新建任务";
+  inferIdentifierType(task?.fields || []);
   $("#title").value = task?.title || "";
   $("#description").value = task?.description || "";
   $("#deadline").value = localDateTime(task?.deadline);
@@ -178,7 +246,6 @@ function fillEditor(task) {
   $("#renameTemplate").value = task?.renameTemplate || "{name}-{student_id}";
   $("#expectedEntries").value = task?.expectedEntries || "";
   setFields(task?.fields?.length ? task.fields : defaultFields());
-  inferIdentifierType(task?.fields || []);
   $("#deleteTask").disabled = !task;
   state.mode = task ? "edit" : "create";
 }
@@ -230,6 +297,33 @@ async function saveSettings(siteUrl) {
   state.settings = settings;
   if (state.current) renderDetail(state.current);
   return settings;
+}
+
+async function saveTemplate() {
+  const settings = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({
+      siteUrl: state.settings.siteUrl || "",
+      taskTemplate: templatePayload(),
+    }),
+  });
+  state.settings = settings;
+  toast("当前模板已保存", "ok");
+}
+
+function applySavedTemplate() {
+  const template = state.settings.taskTemplate;
+  if (!template) {
+    toast("还没有保存过模板", "error");
+    return;
+  }
+  setFields(template.fields || defaultFields());
+  $("#allowedTypes").value = template.fileRules?.allowedTypes?.join(",") || "pdf,doc,docx,jpg,png,zip";
+  $("#maxSizeMb").value = template.fileRules?.maxSizeMb || 20;
+  $("#maxCount").value = template.fileRules?.maxCount || 1;
+  $("#renameTemplate").value = template.renameTemplate || "{name}-{student_id}";
+  inferIdentifierType(template.fields || []);
+  toast("已应用保存的模板", "ok");
 }
 
 function renderTaskList() {
@@ -405,20 +499,20 @@ function renderSubmissionTable() {
     </div>
   `;
   $$("[data-delete]").forEach((button) => {
-    button.addEventListener("click", () => deleteSubmission(button.dataset.delete));
+    button.addEventListener("click", safe(() => deleteSubmission(button.dataset.delete)));
   });
   bindFileActionButtons();
 }
 
 function bindFileActionButtons() {
   $$("[data-file-preview]").forEach((button) => {
-    button.onclick = () => previewFile(button.dataset.filePreview);
+    button.onclick = safe(() => previewFile(button.dataset.filePreview));
   });
   $$("[data-file-download]").forEach((button) => {
-    button.onclick = () => downloadFile(button.dataset.fileDownload);
+    button.onclick = safe(() => downloadFile(button.dataset.fileDownload));
   });
   $$("[data-file-delete]").forEach((button) => {
-    button.onclick = () => deleteFile(button.dataset.fileDelete);
+    button.onclick = safe(() => deleteFile(button.dataset.fileDelete));
   });
 }
 
@@ -431,10 +525,16 @@ function downloadFile(id) {
 }
 
 async function deleteFile(id) {
-  if (!confirm("删除这个文件？提交记录会保留，但该文件会从服务器移除。")) return;
+  const ok = await confirmInApp({
+    title: "删除文件",
+    body: "提交记录会保留，但该文件会从服务器移除。",
+    okText: "删除文件",
+  });
+  if (!ok) return;
   await api(`/api/files/${id}`, { method: "DELETE" });
   await selectTask(state.current.id);
   if ($("#fileDialog").open) renderFileManager();
+  toast("文件已删除", "ok");
 }
 
 function openFileManager() {
@@ -480,13 +580,25 @@ function renderFileManager() {
 }
 
 async function deleteSubmission(id) {
-  if (!confirm("删除这条提交记录及文件？")) return;
+  const ok = await confirmInApp({
+    title: "删除提交记录",
+    body: "这会同时删除该提交记录下的所有文件。",
+    okText: "删除提交",
+  });
+  if (!ok) return;
   await api(`/api/submissions/${id}`, { method: "DELETE" });
   await selectTask(state.current.id);
+  toast("提交记录已删除", "ok");
 }
 
 async function deleteTask() {
-  if (!state.current || !confirm(`删除任务「${state.current.title}」及所有提交文件？`)) return;
+  if (!state.current) return;
+  const ok = await confirmInApp({
+    title: "删除任务",
+    body: `删除任务「${state.current.title}」及所有提交文件？此操作不可恢复。`,
+    okText: "删除任务",
+  });
+  if (!ok) return;
   await api(`/api/tasks/${state.current.id}`, { method: "DELETE" });
   state.current = null;
   state.detail = null;
@@ -497,6 +609,7 @@ async function deleteTask() {
   ["editTask", "copyLink", "showQr", "openFileManager", "exportCsv", "downloadZip"].forEach((id) => $(`#${id}`).disabled = true);
   await loadTasks();
   closeEditor();
+  toast("任务已删除", "ok");
 }
 
 async function download(path, filename) {
@@ -518,6 +631,8 @@ async function download(path, filename) {
 }
 
 async function copyText(text, done = "已复制") {
+  if (!text) throw new Error("没有可复制的内容");
+  if (!navigator.clipboard) throw new Error("当前浏览器不允许访问剪贴板");
   await navigator.clipboard.writeText(text);
   toast(done, "ok");
 }
@@ -536,61 +651,59 @@ function bind() {
       $("#loginMessage").className = "message error";
     }
   });
-  $("#logout").addEventListener("click", logout);
-  $("#openSettings").addEventListener("click", () => {
+  $("#logout").addEventListener("click", safe(logout));
+  $("#openSettings").addEventListener("click", safe(() => {
     $("#siteUrl").value = state.settings.siteUrl || "";
     $("#settingsMessage").textContent = "";
     $("#settingsDialog").showModal();
-  });
+  }));
   $("#closeSettings").addEventListener("click", () => $("#settingsDialog").close());
   $("#clearSiteUrl").addEventListener("click", () => {
     $("#siteUrl").value = "";
   });
-  $("#saveSettings").addEventListener("click", async () => {
+  $("#saveSettings").addEventListener("click", safe(async () => {
     $("#settingsMessage").textContent = "正在保存...";
     $("#settingsMessage").className = "message";
-    try {
-      const settings = await saveSettings($("#siteUrl").value);
-      $("#siteUrl").value = settings.siteUrl || "";
-      $("#settingsMessage").textContent = "设置已保存";
-      $("#settingsMessage").className = "message ok";
-    } catch (error) {
-      $("#settingsMessage").textContent = error.message;
-      $("#settingsMessage").className = "message error";
-    }
-  });
-  $("#newTask").addEventListener("click", () => openEditor(null));
-  $("#emptyNewTask").addEventListener("click", () => openEditor(null));
-  $("#editTask").addEventListener("click", () => openEditor(state.current));
+    const settings = await saveSettings($("#siteUrl").value);
+    $("#siteUrl").value = settings.siteUrl || "";
+    $("#settingsMessage").textContent = "设置已保存";
+    $("#settingsMessage").className = "message ok";
+    toast("系统设置已保存", "ok");
+  }));
+  $("#newTask").addEventListener("click", safe(() => openEditor(null)));
+  $("#emptyNewTask").addEventListener("click", safe(() => openEditor(null)));
+  $("#editTask").addEventListener("click", safe(() => openEditor(state.current)));
   $("#closeEditor").addEventListener("click", closeEditor);
   $("#drawerScrim").addEventListener("click", closeEditor);
   $("#taskSearch").addEventListener("input", renderTaskList);
   $("#submissionSearch").addEventListener("input", renderSubmissionTable);
-  $("#addField").addEventListener("click", () => addField({ required: true }));
+  $("#addField").addEventListener("click", safe(() => addField({ required: true })));
   $("#identifierType").addEventListener("change", () => {
-    state.identifierType = $("#identifierType").value;
-    if (state.mode === "create") setFields(defaultFields());
+    applyIdentifierTemplate();
   });
-  $("[data-preset='student']").addEventListener("click", () => setFields(defaultFields()));
-  $("#saveTask").addEventListener("click", saveTask);
-  $("#resetEditor").addEventListener("click", () => fillEditor(state.mode === "edit" ? state.current : null));
-  $("#deleteTask").addEventListener("click", deleteTask);
-  $("#copyLink").addEventListener("click", () => copyText(absoluteSubmitUrl(state.current), "提交链接已复制"));
-  $("#copyLinkInline").addEventListener("click", () => copyText(absoluteSubmitUrl(state.current), "提交链接已复制"));
-  $("#copyMissing").addEventListener("click", () => copyText(state.detail.stats.missing.join("\n"), "缺交名单已复制"));
-  $("#showQr").addEventListener("click", () => {
+  $("[data-preset='student']").addEventListener("click", safe(applyIdentifierTemplate));
+  $("#applySavedTemplate").addEventListener("click", safe(applySavedTemplate));
+  $("#saveTask").addEventListener("click", safe(saveTask));
+  $("#saveTemplate").addEventListener("click", safe(saveTemplate));
+  $("#resetEditor").addEventListener("click", safe(() => fillEditor(state.mode === "edit" ? state.current : null)));
+  $("#deleteTask").addEventListener("click", safe(deleteTask));
+  $("#copyLink").addEventListener("click", safe(() => copyText(absoluteSubmitUrl(state.current), "提交链接已复制")));
+  $("#copyLinkInline").addEventListener("click", safe(() => copyText(absoluteSubmitUrl(state.current), "提交链接已复制")));
+  $("#copyMissing").addEventListener("click", safe(() => copyText(state.detail.stats.missing.join("\n"), "缺交名单已复制")));
+  $("#showQr").addEventListener("click", safe(() => {
     const url = absoluteSubmitUrl(state.current);
+    if (!url) throw new Error("请先选择任务");
     $("#qrImage").src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(url)}`;
     $("#qrLink").textContent = url;
     $("#qrDialog").showModal();
-  });
+  }));
   $("#closeQr").addEventListener("click", () => $("#qrDialog").close());
-  $("#openFileManager").addEventListener("click", openFileManager);
-  $("#openFileManagerInline").addEventListener("click", openFileManager);
+  $("#openFileManager").addEventListener("click", safe(openFileManager));
+  $("#openFileManagerInline").addEventListener("click", safe(openFileManager));
   $("#closeFileDialog").addEventListener("click", () => $("#fileDialog").close());
   $("#fileSearch").addEventListener("input", renderFileManager);
-  $("#exportCsv").addEventListener("click", () => download(`/api/tasks/${state.current.id}/export.csv`, `${state.current.title}.csv`).catch((error) => toast(error.message, "error")));
-  $("#downloadZip").addEventListener("click", () => download(`/api/tasks/${state.current.id}/download.zip`, `${state.current.title}.zip`).catch((error) => toast(error.message, "error")));
+  $("#exportCsv").addEventListener("click", safe(() => download(`/api/tasks/${state.current.id}/export.csv`, `${state.current.title}.csv`)));
+  $("#downloadZip").addEventListener("click", safe(() => download(`/api/tasks/${state.current.id}/download.zip`, `${state.current.title}.zip`)));
 }
 
 fillEditor(null);
