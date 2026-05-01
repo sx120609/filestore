@@ -100,6 +100,11 @@ def init_db() -> None:
                 path TEXT NOT NULL,
                 FOREIGN KEY(submission_id) REFERENCES submissions(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
 
@@ -119,6 +124,40 @@ def task_to_dict(row: sqlite3.Row) -> dict:
         "createdAt": row["created_at"],
         "submitUrl": f"/submit/{row['token']}",
     }
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+
+
+def normalize_site_url(value: str) -> str:
+    site_url = str(value or "").strip().rstrip("/")
+    if not site_url:
+        return ""
+    parsed = urlparse(site_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("站点地址必须是完整 URL，例如 https://files.example.com")
+    if parsed.path not in {"", "/"}:
+        raise ValueError("站点地址只填写域名根地址，不要包含路径")
+    return site_url
+
+
+def app_settings() -> dict:
+    return {"siteUrl": get_setting("site_url")}
 
 
 def cookie_value(handler: SimpleHTTPRequestHandler, name: str) -> str:
@@ -424,7 +463,12 @@ class AppHandler(SimpleHTTPRequestHandler):
         if path == "/api/admin/me":
             if not require_admin(self):
                 return
-            send_json(self, {"ok": True, "role": "admin"})
+            send_json(self, {"ok": True, "role": "admin", "settings": app_settings()})
+            return
+        if path == "/api/settings":
+            if not require_admin(self):
+                return
+            send_json(self, app_settings())
             return
         if path == "/api/tasks":
             if not require_admin(self):
@@ -511,6 +555,18 @@ class AppHandler(SimpleHTTPRequestHandler):
                     "Set-Cookie": "filestore_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
                 },
             )
+            return
+        if path == "/api/settings":
+            if not require_admin(self):
+                return
+            try:
+                payload = read_json_body(self)
+                site_url = normalize_site_url(str(payload.get("siteUrl", "")))
+            except Exception as exc:
+                send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            set_setting("site_url", site_url)
+            send_json(self, app_settings())
             return
         if path == "/api/tasks":
             if not require_admin(self):
@@ -780,7 +836,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     init_db()
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("PORT", "8964"))
     server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
     print(f"Filestore running at http://127.0.0.1:{port}")
     print(f"Default admin password: {ADMIN_PASSWORD}")
