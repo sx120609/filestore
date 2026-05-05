@@ -275,6 +275,8 @@ function addField(field = {}) {
 function setFields(fields) {
   $("#fields").innerHTML = "";
   fields.forEach(addField);
+  renderRenameFieldOptions();
+  updateRenamePreview();
 }
 
 function applyTemplate(template = selectedTemplate()?.template) {
@@ -284,6 +286,7 @@ function applyTemplate(template = selectedTemplate()?.template) {
   $("#maxSizeMb").value = template.fileRules?.maxSizeMb || 20;
   $("#maxCount").value = template.fileRules?.maxCount || 1;
   $("#renameTemplate").value = template.renameTemplate || "{name}-{student_id}";
+  updateRenamePreview();
   toast("模板已应用", "ok");
 }
 
@@ -295,6 +298,67 @@ function collectFields() {
     placeholder: row.querySelector(".field-placeholder").value.trim(),
     required: row.querySelector(".field-required").checked,
   }));
+}
+
+function fieldSampleValue(field) {
+  const key = field.key || "";
+  if (key === "name") return "张三";
+  if (key === "student_id") {
+    return field.label?.includes("考试") ? "2420150508" : "2020240444";
+  }
+  return field.placeholder || field.label || key || "内容";
+}
+
+function renderRenameFieldOptions() {
+  const select = $("#renameFieldSelect");
+  if (!select) return;
+  const fields = collectFields().filter((field) => field.key);
+  const options = [
+    ...fields.map((field) => `<option value="${escapeHtml(field.key)}">${escapeHtml(field.label || field.key)}</option>`),
+    "<option value=\"original\">原文件名</option>",
+    "<option value=\"index\">序号</option>",
+  ];
+  select.innerHTML = options.join("");
+}
+
+function renderRenameTemplate(template, sampleData, originalName = "材料.pdf", index = 1) {
+  const values = { ...sampleData, original: "材料", index: String(index) };
+  const rendered = template.replace(/\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}/g, (_, key, op, rawCount) => {
+    const value = String(values[key] || "");
+    const count = Number(rawCount || 0);
+    if (op === "last") return count > 0 ? value.slice(-count) : "";
+    if (op === "first") return count > 0 ? value.slice(0, count) : "";
+    return value;
+  }).trim();
+  const ext = originalName.includes(".") ? originalName.slice(originalName.lastIndexOf(".")) : "";
+  return `${rendered || "文件"}${ext}`;
+}
+
+function updateRenamePreview() {
+  const preview = $("#renamePreview");
+  if (!preview) return;
+  const fields = collectFields();
+  const sampleData = Object.fromEntries(fields.map((field) => [field.key, fieldSampleValue(field)]));
+  const template = $("#renameTemplate").value.trim() || "{name}-{student_id}";
+  preview.textContent = `预览：${renderRenameTemplate(template, sampleData)}`;
+}
+
+function insertAtCursor(input, text) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+  input.focus();
+  input.setSelectionRange(start + text.length, start + text.length);
+  updateRenamePreview();
+}
+
+function renameFieldToken() {
+  const key = $("#renameFieldSelect").value;
+  const mode = $("#renameSliceMode").value;
+  const count = Math.min(20, Math.max(1, Number($("#renameSliceCount").value || 2)));
+  if (!key) throw new Error("请选择要插入的字段");
+  if (mode && key === "index") throw new Error("序号不需要截取位数");
+  return mode ? `{${key}|${mode}:${count}}` : `{${key}}`;
 }
 
 function editorPayload() {
@@ -341,6 +405,7 @@ function fillEditor(task) {
   $("#renameTemplate").value = task?.renameTemplate || "{name}-{student_id}";
   $("#expectedEntries").value = task?.expectedEntries || "";
   setFields(task?.fields?.length ? task.fields : defaultFields());
+  updateRenamePreview();
   $("#deleteTask").disabled = !task;
   state.mode = task ? "edit" : "create";
 }
@@ -851,6 +916,19 @@ function bind() {
   $("#taskSearch").addEventListener("input", renderTaskList);
   $("#submissionSearch").addEventListener("input", renderSubmissionTable);
   $("#addField").addEventListener("click", safe(() => addField({ required: true })));
+  $("#fields").addEventListener("input", () => {
+    renderRenameFieldOptions();
+    updateRenamePreview();
+  });
+  $("#renameTemplate").addEventListener("input", updateRenamePreview);
+  $$(".rename-token").forEach((button) => {
+    button.addEventListener("click", () => insertAtCursor($("#renameTemplate"), button.dataset.token || ""));
+  });
+  $("#insertRenameField").addEventListener("click", safe(() => insertAtCursor($("#renameTemplate"), renameFieldToken())));
+  $("#resetRenameTemplate").addEventListener("click", () => {
+    $("#renameTemplate").value = "{name}-{student_id}";
+    updateRenamePreview();
+  });
   $("#templateSelect").addEventListener("change", () => {
     state.templateKey = $("#templateSelect").value;
     $("#deleteTemplate").disabled = state.templateKey.startsWith("builtin:");

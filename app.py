@@ -352,9 +352,19 @@ def render_name(template: str, data: dict, original_name: str, index: int) -> st
     values.update({"index": str(index), "original": safe_filename(Path(original_name).stem)})
 
     def repl(match: re.Match[str]) -> str:
-        return values.get(match.group(1), "")
+        key = match.group(1)
+        op = match.group(2)
+        arg = match.group(3)
+        value = values.get(key, "")
+        if op == "last":
+            count = int(arg or "0")
+            return value[-count:] if count > 0 else ""
+        if op == "first":
+            count = int(arg or "0")
+            return value[:count] if count > 0 else ""
+        return value
 
-    rendered = re.sub(r"\{([a-zA-Z0-9_]+)\}", repl, base_template)
+    rendered = re.sub(r"\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}", repl, base_template)
     rendered = safe_filename(rendered)
     if index > 1 and "{index}" not in template:
         rendered = f"{rendered}-{index}"
