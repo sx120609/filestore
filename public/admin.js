@@ -5,6 +5,9 @@ const state = {
   mode: "create",
   templateKey: "builtin:student",
   settings: { siteUrl: "", siteTitle: "Filestore", taskTemplates: [] },
+  authed: false,
+  softRefreshTimer: null,
+  softRefreshing: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -66,8 +69,14 @@ async function api(path, options = {}) {
 }
 
 function setAuthed(isAuthed) {
+  state.authed = isAuthed;
   document.body.classList.toggle("auth-pending", !isAuthed);
   $("#loginScreen").hidden = isAuthed;
+  if (isAuthed) {
+    startSoftRefresh();
+  } else {
+    stopSoftRefresh();
+  }
 }
 
 function applyBranding() {
@@ -458,13 +467,14 @@ async function saveTask() {
   }
 }
 
-async function loadTasks() {
-  $("#taskList").innerHTML = "<p class='muted-pad'>加载任务...</p>";
+async function loadTasks({ silent = false } = {}) {
+  if (!silent) $("#taskList").innerHTML = "<p class='muted-pad'>加载任务...</p>";
   try {
     state.tasks = await api("/api/tasks");
     renderTaskList();
   } catch (error) {
-    $("#taskList").innerHTML = `<p class="message error">${escapeHtml(error.message)}</p>`;
+    if (!silent) $("#taskList").innerHTML = `<p class="message error">${escapeHtml(error.message)}</p>`;
+    throw error;
   }
 }
 
@@ -602,6 +612,53 @@ async function selectTask(id) {
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+function clearDashboardSelection() {
+  state.current = null;
+  state.detail = null;
+  $("#activeTitle").textContent = "请选择或新建任务";
+  $("#activeMeta").textContent = "任务链接、统计、提交记录和缺交名单会集中显示在这里。";
+  $("#dashboard").hidden = true;
+  $("#emptyDashboard").hidden = false;
+  ["editTask", "copyLink", "showQr", "openFileManager", "exportCsv", "downloadZip"].forEach((id) => $(`#${id}`).disabled = true);
+}
+
+async function softRefresh() {
+  if (!state.authed || state.softRefreshing) return;
+  state.softRefreshing = true;
+  try {
+    const currentId = state.current?.id;
+    await loadTasks({ silent: true });
+    if (!currentId) return;
+    const latest = await api(`/api/tasks/${currentId}`);
+    state.current = latest;
+    state.detail = latest;
+    renderTaskList();
+    renderDetail(latest);
+    if ($("#fileDialog").open) renderFileManager();
+  } catch (error) {
+    if (error.message === "任务不存在") {
+      clearDashboardSelection();
+      renderTaskList();
+      return;
+    }
+    console.warn("soft refresh failed", error);
+  } finally {
+    state.softRefreshing = false;
+  }
+}
+
+function startSoftRefresh() {
+  if (state.softRefreshTimer) return;
+  state.softRefreshTimer = window.setInterval(softRefresh, 8000);
+}
+
+function stopSoftRefresh() {
+  if (!state.softRefreshTimer) return;
+  window.clearInterval(state.softRefreshTimer);
+  state.softRefreshTimer = null;
+  state.softRefreshing = false;
 }
 
 function fileTotal(task) {
@@ -847,13 +904,7 @@ async function deleteTask() {
   });
   if (!ok) return;
   await api(`/api/tasks/${state.current.id}`, { method: "DELETE" });
-  state.current = null;
-  state.detail = null;
-  $("#activeTitle").textContent = "请选择或新建任务";
-  $("#activeMeta").textContent = "任务链接、统计、提交记录和缺交名单会集中显示在这里。";
-  $("#dashboard").hidden = true;
-  $("#emptyDashboard").hidden = false;
-  ["editTask", "copyLink", "showQr", "openFileManager", "exportCsv", "downloadZip"].forEach((id) => $(`#${id}`).disabled = true);
+  clearDashboardSelection();
   await loadTasks();
   closeEditor();
   toast("任务已删除", "ok");
