@@ -1,5 +1,8 @@
 const token = location.pathname.split("/").pop();
 let task = null;
+let selectedFiles = [];
+let draggedFileId = null;
+let successReset = false;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -15,6 +18,156 @@ function message(text, type = "") {
   const node = $("#submitMessage");
   node.textContent = text;
   node.className = `message submit-form ${type}`;
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+
+function fileKey(file) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+function fileExt(fileName) {
+  return fileName.includes(".") ? fileName.split(".").pop().toLowerCase() : "";
+}
+
+function originalStem(fileName) {
+  const dot = fileName.lastIndexOf(".");
+  return dot > 0 ? fileName.slice(0, dot) : fileName;
+}
+
+function safeFileName(value) {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[. ]+|[. ]+$/g, "")
+    .slice(0, 140) || "file";
+}
+
+function currentData() {
+  const data = {};
+  task.fields.forEach((field) => {
+    const input = document.querySelector(`[name="${CSS.escape(field.key)}"]`);
+    data[field.key] = input?.value.trim() || field.placeholder || field.label || "";
+  });
+  return data;
+}
+
+function renamedFileName(file, index) {
+  const template = task.renameTemplate || "{name}-{student_id}";
+  const data = currentData();
+  const values = {
+    ...Object.fromEntries(Object.entries(data).map(([key, value]) => [key, safeFileName(value)])),
+    index: String(index),
+    original: safeFileName(originalStem(file.name)),
+  };
+  const rendered = template.replace(/\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}/g, (_, key, op, rawCount) => {
+    const value = String(values[key] || "");
+    const count = Number(rawCount || 0);
+    if (op === "last") return count > 0 ? value.slice(-count) : "";
+    if (op === "first") return count > 0 ? value.slice(0, count) : "";
+    return value;
+  });
+  let base = safeFileName(rendered);
+  if (index > 1 && !template.includes("{index}")) base = `${base}-${index}`;
+  const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")).toLowerCase() : "";
+  return `${base}${ext}`;
+}
+
+function fileIcon(file) {
+  const ext = fileExt(file.name);
+  if (file.type.startsWith("image/")) return "IMG";
+  if (ext === "pdf") return "PDF";
+  if (["doc", "docx"].includes(ext)) return "W";
+  if (["ppt", "pptx"].includes(ext)) return "P";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "X";
+  if (["zip", "rar", "7z"].includes(ext)) return "ZIP";
+  return ext ? ext.slice(0, 4).toUpperCase() : "FILE";
+}
+
+function moveFile(fromIndex, toIndex) {
+  if (toIndex < 0 || toIndex >= selectedFiles.length || fromIndex === toIndex) return;
+  const [item] = selectedFiles.splice(fromIndex, 1);
+  selectedFiles.splice(toIndex, 0, item);
+  renderFileQueue();
+}
+
+function removeFile(id) {
+  const item = selectedFiles.find((entry) => entry.id === id);
+  if (item?.url) URL.revokeObjectURL(item.url);
+  selectedFiles = selectedFiles.filter((entry) => entry.id !== id);
+  renderFileQueue();
+}
+
+function renderFileQueue() {
+  const queue = $("#fileQueue");
+  queue.hidden = !selectedFiles.length;
+  if (!selectedFiles.length) {
+    queue.innerHTML = "";
+    return;
+  }
+
+  queue.innerHTML = `
+    <div class="submit-file-head">
+      <strong>已选择 ${selectedFiles.length} 个文件</strong>
+      <span>拖动卡片可调整顺序，系统会按当前顺序上传并命名。</span>
+    </div>
+    <div class="submit-file-grid">
+      ${selectedFiles.map((item, index) => {
+        const file = item.file;
+        const isImage = file.type.startsWith("image/");
+        const renamed = renamedFileName(file, index + 1);
+        return `
+          <article class="submit-file-card" draggable="true" data-file-id="${escapeHtml(item.id)}">
+            <div class="submit-file-title">
+              <span class="file-type-badge">${escapeHtml(fileIcon(file))}</span>
+              <strong title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</strong>
+            </div>
+            <button class="submit-file-remove" type="button" data-action="remove" data-file-id="${escapeHtml(item.id)}" title="删除">×</button>
+            <div class="submit-file-preview">
+              ${isImage ? `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(file.name)}">` : `<span class="submit-file-icon">${escapeHtml(fileIcon(file))}</span>`}
+            </div>
+            <dl class="submit-file-meta">
+              <dt>顺序</dt><dd>${index + 1}</dd>
+              <dt>大小</dt><dd>${formatBytes(file.size)}</dd>
+              <dt>将保存为</dt><dd title="${escapeHtml(renamed)}">${escapeHtml(renamed)}</dd>
+            </dl>
+            <div class="submit-file-actions">
+              <button type="button" data-action="up" data-file-id="${escapeHtml(item.id)}" ${index === 0 ? "disabled" : ""}>上移</button>
+              <button type="button" data-action="down" data-file-id="${escapeHtml(item.id)}" ${index === selectedFiles.length - 1 ? "disabled" : ""}>下移</button>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function addFiles(files) {
+  const known = new Set(selectedFiles.map((item) => fileKey(item.file)));
+  const additions = files
+    .filter((file) => !known.has(fileKey(file)))
+    .map((file) => ({
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
+      file,
+      url: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
+    }));
+  selectedFiles = [...selectedFiles, ...additions];
+  renderFileQueue();
+}
+
+function clearFiles() {
+  selectedFiles.forEach((item) => {
+    if (item.url) URL.revokeObjectURL(item.url);
+  });
+  selectedFiles = [];
+  $("#files").value = "";
+  renderFileQueue();
 }
 
 function renderTask() {
@@ -67,17 +220,70 @@ function validateFiles(files) {
   const allowed = new Set(rules.allowedTypes);
   const maxBytes = Number(rules.maxSizeMb) * 1024 * 1024;
   for (const file of files) {
-    const ext = file.name.split(".").pop().toLowerCase();
+    const ext = fileExt(file.name);
     if (allowed.size && !allowed.has(ext)) return `${file.name} 类型不允许`;
     if (file.size > maxBytes) return `${file.name} 超过大小限制`;
   }
   return "";
 }
 
+$("#files").addEventListener("change", (event) => {
+  addFiles([...event.currentTarget.files]);
+  event.currentTarget.value = "";
+});
+
+$("#dynamicFields").addEventListener("input", renderFileQueue);
+
+$("#fileQueue").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const index = selectedFiles.findIndex((item) => item.id === button.dataset.fileId);
+  if (index < 0) return;
+  if (button.dataset.action === "remove") removeFile(button.dataset.fileId);
+  if (button.dataset.action === "up") moveFile(index, index - 1);
+  if (button.dataset.action === "down") moveFile(index, index + 1);
+});
+
+$("#fileQueue").addEventListener("dragstart", (event) => {
+  const card = event.target.closest(".submit-file-card");
+  if (!card) return;
+  draggedFileId = card.dataset.fileId;
+  card.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", draggedFileId);
+});
+
+$("#fileQueue").addEventListener("dragend", () => {
+  draggedFileId = null;
+  document.querySelectorAll(".submit-file-card.dragging").forEach((card) => card.classList.remove("dragging"));
+});
+
+$("#fileQueue").addEventListener("dragover", (event) => {
+  const card = event.target.closest(".submit-file-card");
+  if (!card || !draggedFileId || card.dataset.fileId === draggedFileId) return;
+  event.preventDefault();
+  const fromIndex = selectedFiles.findIndex((item) => item.id === draggedFileId);
+  const toIndex = selectedFiles.findIndex((item) => item.id === card.dataset.fileId);
+  moveFile(fromIndex, toIndex);
+});
+
+$("#submitForm").addEventListener("reset", () => {
+  setTimeout(() => {
+    if (successReset) {
+      successReset = false;
+      return;
+    }
+    clearFiles();
+    message("");
+    $("#progress").hidden = true;
+    $("#progress").value = 0;
+  });
+});
+
 $("#submitForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const files = [...$("#files").files];
+  const files = selectedFiles.map((item) => item.file);
   const fileError = validateFiles(files);
   if (fileError) {
     message(fileError, "error");
@@ -85,6 +291,8 @@ $("#submitForm").addEventListener("submit", (event) => {
   }
 
   const formData = new FormData(form);
+  formData.delete("files");
+  selectedFiles.forEach((item) => formData.append("files", item.file, item.file.name));
   const xhr = new XMLHttpRequest();
   $("#progress").hidden = false;
   $("#progress").value = 0;
@@ -96,7 +304,9 @@ $("#submitForm").addEventListener("submit", (event) => {
   xhr.addEventListener("load", () => {
     const payload = JSON.parse(xhr.responseText || "{}");
     if (xhr.status >= 200 && xhr.status < 300) {
+      successReset = true;
       form.reset();
+      clearFiles();
       $("#progress").value = 100;
       message(`提交成功，编号 ${payload.submissionId}。文件：${payload.files.join("、")}`, "ok");
     } else {

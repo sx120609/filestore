@@ -545,7 +545,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             if not task:
                 send_json(self, {"error": "提交链接不存在"}, HTTPStatus.NOT_FOUND)
                 return
-            public_task = {key: task[key] for key in ["title", "description", "deadline", "fields", "fileRules", "status"]}
+            public_task = {key: task[key] for key in ["title", "description", "deadline", "fields", "fileRules", "renameTemplate", "status"]}
             public_task["siteTitle"] = get_setting("site_title", "Filestore")
             send_json(self, public_task)
             return

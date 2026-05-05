@@ -876,6 +876,147 @@ dialog::backdrop { background: rgba(20, 31, 42, .45); }
   background: var(--surface-2);
 }
 
+.submit-file-queue {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.submit-file-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.submit-file-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.submit-file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.submit-file-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 170px auto auto;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f8fa;
+  cursor: grab;
+}
+
+.submit-file-card.dragging {
+  opacity: .55;
+  border-color: var(--accent);
+}
+
+.submit-file-title {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding-right: 28px;
+}
+
+.submit-file-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.file-type-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: #e8f2f2;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.submit-file-remove {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--danger);
+  font-size: 20px;
+}
+
+.submit-file-preview {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.submit-file-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.submit-file-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.submit-file-meta {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.submit-file-meta dt {
+  color: var(--muted);
+}
+
+.submit-file-meta dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submit-file-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.submit-file-actions button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 progress {
   width: 100%;
   height: 14px;
@@ -1094,6 +1235,19 @@ progress {
 
   .upload-zone {
     padding: 14px;
+  }
+
+  .submit-file-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .submit-file-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .submit-file-card {
+    grid-template-rows: auto 190px auto auto;
   }
 }
 
