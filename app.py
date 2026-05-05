@@ -443,14 +443,28 @@ def build_task_detail(task_id: int) -> dict | None:
         )
     task["submissions"] = submissions
     expected = [line.strip() for line in task["expectedEntries"].splitlines() if line.strip()]
-    submitted_keys = {
-        (item["data"].get("student_id") or item["data"].get("name") or "").strip()
-        for item in submissions
-    }
+    expected_keys = set(expected)
+    matched_submitted_keys = set()
+    unexpected = []
+    for item in submissions:
+        identity = (item["data"].get("student_id") or item["data"].get("name") or "").strip()
+        if expected_keys and identity in expected_keys:
+            matched_submitted_keys.add(identity)
+        elif expected_keys:
+            unexpected.append(
+                {
+                    "id": item["id"],
+                    "name": item["data"].get("name") or "",
+                    "identity": identity,
+                    "createdAt": item["createdAt"],
+                }
+            )
     task["stats"] = {
         "submitted": len(submissions),
+        "inListSubmitted": len(matched_submitted_keys) if expected else len(submissions),
         "expected": len(expected),
-        "missing": [item for item in expected if item not in submitted_keys],
+        "missing": [item for item in expected if item not in matched_submitted_keys],
+        "unexpected": unexpected,
     }
     return task
 

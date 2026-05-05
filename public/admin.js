@@ -703,13 +703,22 @@ function fileActions(file) {
 
 function renderMetrics(task) {
   const stats = task.stats;
-  const rate = stats.expected ? Math.round((stats.submitted / stats.expected) * 100) : 0;
+  const inListSubmitted = stats.inListSubmitted ?? stats.submitted;
+  const unexpected = stats.unexpected || [];
+  const rate = stats.expected ? Math.round((inListSubmitted / stats.expected) * 100) : 0;
+  const submittedLabel = stats.expected ? "名单内已提交" : "已提交";
   $("#metrics").innerHTML = `
-    <div class="metric"><span>已提交</span><b>${stats.submitted}</b><small>${stats.expected ? `完成率 ${rate}%` : "未设置名单"}</small></div>
+    <div class="metric"><span>${submittedLabel}</span><b>${inListSubmitted}</b><small>${stats.expected ? `完成率 ${rate}%` : "未设置名单"}</small></div>
     <div class="metric"><span>应提交</span><b>${stats.expected || "-"}</b><small>来自名单行数</small></div>
     <div class="metric"><span>未提交</span><b>${stats.missing.length}</b><small>${stats.missing.length ? "可复制催交通知" : "暂无缺交"}</small></div>
+    <div class="metric"><span>名单外</span><b>${unexpected.length}</b><small>${unexpected.length ? unexpected.map(unexpectedLabel).join("、") : "暂无名单外提交"}</small></div>
     <div class="metric"><span>文件数</span><b>${fileTotal(task)}</b><small>已上传文件总数</small></div>
   `;
+}
+
+function unexpectedLabel(item) {
+  const identity = item.identity || item.name || `#${item.id}`;
+  return escapeHtml(identity);
 }
 
 function renderRules(task) {
@@ -732,6 +741,13 @@ function renderMissing(task) {
     : "<p class='muted-pad compact'>没有缺交记录。</p>";
 }
 
+function renderUnexpected(task) {
+  const unexpected = task.stats.unexpected || [];
+  $("#unexpectedList").innerHTML = unexpected.length
+    ? unexpected.map((item) => `<span>${unexpectedLabel(item)}</span>`).join("")
+    : "<p class='muted-pad compact'>没有名单外提交。</p>";
+}
+
 function renderDetail(task) {
   $("#emptyDashboard").hidden = true;
   $("#dashboard").hidden = false;
@@ -742,6 +758,7 @@ function renderDetail(task) {
   renderMetrics(task);
   renderRules(task);
   renderMissing(task);
+  renderUnexpected(task);
   renderSubmissionTable();
 }
 

@@ -371,7 +371,7 @@ p { color: var(--muted); }
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -387,7 +387,14 @@ p { color: var(--muted); }
 .metric { padding: 14px; }
 .metric span { display: block; color: var(--muted); font-size: 13px; }
 .metric b { display: block; margin-top: 7px; font-size: 28px; line-height: 1; }
-.metric small { display: block; margin-top: 7px; color: var(--muted); }
+.metric small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .share-panel {
   display: grid;
