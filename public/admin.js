@@ -233,6 +233,12 @@ function absoluteSubmitUrl(task) {
   return `${base}${task.submitUrl}`;
 }
 
+function absoluteStatusUrl(task) {
+  if (!task) return "";
+  const base = (state.settings.siteUrl || location.origin).replace(/\/+$/, "");
+  return `${base}/status/${task.token}`;
+}
+
 function defaultTemplate() {
   return builtInTemplates["builtin:student"];
 }
@@ -754,6 +760,7 @@ function renderDetail(task) {
   $("#activeTitle").textContent = task.title;
   $("#activeMeta").textContent = `${task.status === "open" ? "开放提交" : "停止提交"} · ${task.deadline ? `截止 ${new Date(task.deadline).toLocaleString()}` : "未设置截止时间"}`;
   $("#shareLink").value = absoluteSubmitUrl(task);
+  $("#statusLink").value = absoluteStatusUrl(task);
   ["editTask", "copyLink", "showQr", "openFileManager", "exportCsv", "downloadZip"].forEach((id) => $(`#${id}`).disabled = false);
   renderMetrics(task);
   renderRules(task);
@@ -1195,6 +1202,7 @@ function bind() {
   $("#deleteTask").addEventListener("click", safe(deleteTask));
   $("#copyLink").addEventListener("click", safe(() => copyText(absoluteSubmitUrl(state.current), "提交链接已复制")));
   $("#copyLinkInline").addEventListener("click", safe(() => copyText(absoluteSubmitUrl(state.current), "提交链接已复制")));
+  $("#copyStatusLink").addEventListener("click", safe(() => copyText(absoluteStatusUrl(state.current), "成功名单链接已复制")));
   $("#copyMissing").addEventListener("click", safe(() => copyText(state.detail.stats.missing.join("\n"), "缺交名单已复制")));
   $("#showQr").addEventListener("click", safe(() => {
     const url = absoluteSubmitUrl(state.current);

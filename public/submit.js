@@ -20,6 +20,17 @@ function message(text, type = "") {
   node.className = `message submit-form ${type}`;
 }
 
+function showStatusShortcut() {
+  const node = $("#statusShortcut");
+  node.hidden = false;
+  node.innerHTML = `
+    <a href="/status/${encodeURIComponent(token)}">
+      查看提交成功名单
+      <span>确认自己是否提交成功，以及提交了哪些文件。</span>
+    </a>
+  `;
+}
+
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -214,6 +225,7 @@ function renderTask() {
     <p>${escapeHtml(submitDescription()).replaceAll("\n", "<br>")}</p>
     ${task.deadline ? `<p class="hint">截止时间：${new Date(task.deadline).toLocaleString()}</p>` : ""}
   `;
+  showStatusShortcut();
 
   if (isClosed) {
     message("该任务已停止提交。", "error");

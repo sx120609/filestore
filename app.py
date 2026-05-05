@@ -469,6 +469,58 @@ def build_task_detail(task_id: int) -> dict | None:
     return task
 
 
+def build_public_status(token: str) -> dict | None:
+    task = get_task_by_token(token)
+    if not task:
+        return None
+    detail = build_task_detail(task["id"])
+    if not detail:
+        return None
+
+    field_keys = [field["key"] for field in detail["fields"]]
+    submissions = []
+    for item in detail["submissions"]:
+        data = item["data"]
+        display_name = str(data.get("name") or "").strip()
+        identity = str(data.get("student_id") or "").strip()
+        if not display_name and field_keys:
+            display_name = str(data.get(field_keys[0]) or "").strip()
+        if not identity:
+            for key in field_keys:
+                value = str(data.get(key) or "").strip()
+                if value and value != display_name:
+                    identity = value
+                    break
+        submissions.append(
+            {
+                "id": item["id"],
+                "displayName": display_name or f"提交 #{item['id']}",
+                "identity": identity,
+                "createdAt": item["createdAt"],
+                "files": [
+                    {
+                        "storedName": file["storedName"],
+                        "size": file["size"],
+                    }
+                    for file in item["files"]
+                ],
+            }
+        )
+
+    return {
+        "title": detail["title"],
+        "deadline": detail["deadline"],
+        "status": detail["status"],
+        "siteTitle": get_setting("site_title", "Filestore"),
+        "stats": {
+            "submitted": detail["stats"]["submitted"],
+            "expected": detail["stats"]["expected"],
+            "missing": len(detail["stats"]["missing"]),
+        },
+        "submissions": submissions,
+    }
+
+
 def delete_task_files(task_id: int) -> None:
     task_dir = UPLOAD_DIR / str(task_id)
     if task_dir.exists() and task_dir.is_dir():
@@ -541,6 +593,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             return str(PUBLIC / "admin.html")
         if parsed.path.startswith("/submit/"):
             return str(PUBLIC / "submit.html")
+        if parsed.path.startswith("/status/"):
+            return str(PUBLIC / "status.html")
         return str(PUBLIC / parsed.path.lstrip("/"))
 
     def log_message(self, fmt: str, *args: object) -> None:
@@ -588,6 +642,14 @@ class AppHandler(SimpleHTTPRequestHandler):
             public_task = {key: task[key] for key in ["title", "description", "deadline", "fields", "fileRules", "renameTemplate", "folderTemplate", "status"]}
             public_task["siteTitle"] = get_setting("site_title", "Filestore")
             send_json(self, public_task)
+            return
+        match = re.fullmatch(r"/api/public/status/([A-Za-z0-9_-]+)", path)
+        if match:
+            status = build_public_status(match.group(1))
+            if not status:
+                send_json(self, {"error": "成功名单不存在"}, HTTPStatus.NOT_FOUND)
+                return
+            send_json(self, status)
             return
         match = re.fullmatch(r"/api/tasks/(\d+)/export.csv", path)
         if match:
