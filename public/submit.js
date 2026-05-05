@@ -31,6 +31,17 @@ function showStatusShortcut() {
   `;
 }
 
+function showSuccessDialog(payload) {
+  const dialog = $("#successDialog");
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  $("#successSummary").textContent = `提交编号 ${payload.submissionId}`;
+  $("#successFiles").innerHTML = files.length
+    ? files.map((file) => `<span>${escapeHtml(file)}</span>`).join("")
+    : "<span>文件已成功上传</span>";
+  $("#successStatusLink").href = `/status/${encodeURIComponent(token)}`;
+  dialog.showModal();
+}
+
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -356,6 +367,7 @@ $("#submitForm").addEventListener("submit", (event) => {
       clearFiles();
       $("#progress").value = 100;
       message(`提交成功，编号 ${payload.submissionId}。文件：${payload.files.join("、")}`, "ok");
+      showSuccessDialog(payload);
     } else {
       message(payload.details ? payload.details.join("；") : payload.error || "提交失败", "error");
     }
@@ -368,3 +380,5 @@ $("#submitForm").addEventListener("submit", (event) => {
 });
 
 loadTask();
+
+$("#closeSuccessDialog").addEventListener("click", () => $("#successDialog").close());

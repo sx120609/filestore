@@ -41,6 +41,22 @@
       <a href="https://github.com/sx120609/filestore/" target="_blank" rel="noopener">GitHub</a>
     </footer>
   </main>
+
+  <dialog id="successDialog" class="success-dialog">
+    <div class="success-check" aria-hidden="true">
+      <svg viewBox="0 0 64 64" role="img">
+        <circle cx="32" cy="32" r="28"></circle>
+        <path d="M19 33.5 28 42 46 23"></path>
+      </svg>
+    </div>
+    <h2>提交成功</h2>
+    <p id="successSummary"></p>
+    <div id="successFiles" class="success-files"></div>
+    <div class="success-actions">
+      <a id="successStatusLink" class="primary success-status-link" href="#">查看提交成功名单</a>
+      <button id="closeSuccessDialog" type="button">关闭</button>
+    </div>
+  </dialog>
   <script src="/submit.js"></script>
 </body>
 </html>
