@@ -877,6 +877,167 @@ async function download(path, filename) {
   URL.revokeObjectURL(url);
 }
 
+function zipSafePathSegment(value) {
+  return cleanRenderedName(String(value || "file").replace(/[\\/:*?"<>|]+/g, "_"));
+}
+
+function renderTemplateBase(template, data = {}, originalName = "", index = 1, totalCount = 1) {
+  const original = originalName.includes(".") ? originalName.slice(0, originalName.lastIndexOf(".")) : originalName;
+  const values = {
+    ...Object.fromEntries(Object.entries(data).map(([key, value]) => [key, zipSafePathSegment(value)])),
+    index: totalCount > 1 ? String(index) : "",
+    original: zipSafePathSegment(original),
+  };
+  const rendered = String(template || "{name}-{student_id}").replace(/\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}/g, (_, key, op, rawCount) => {
+    const value = String(values[key] || "");
+    const count = Number(rawCount || 0);
+    if (op === "last") return count > 0 ? value.slice(-count) : "";
+    if (op === "first") return count > 0 ? value.slice(0, count) : "";
+    return value;
+  });
+  return zipSafePathSegment(rendered);
+}
+
+function zipEntryPath(task, submission, file) {
+  if (submission.files.length <= 1) return zipSafePathSegment(file.storedName);
+  const folder = renderTemplateBase(task.folderTemplate || "{name}-{student_id}", submission.data);
+  return `${folder}/${zipSafePathSegment(file.storedName)}`;
+}
+
+function uniqueZipPath(path, used) {
+  if (!used.has(path)) {
+    used.add(path);
+    return path;
+  }
+  const slash = path.lastIndexOf("/");
+  const dir = slash >= 0 ? `${path.slice(0, slash + 1)}` : "";
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let index = 2;
+  let next = `${dir}${stem}-${index}${ext}`;
+  while (used.has(next)) {
+    index += 1;
+    next = `${dir}${stem}-${index}${ext}`;
+  }
+  used.add(next);
+  return next;
+}
+
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date = new Date()) {
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const day = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, day };
+}
+
+function zipHeader(fields) {
+  const bytes = new Uint8Array(fields.reduce((sum, item) => sum + item[1], 0));
+  const view = new DataView(bytes.buffer);
+  let offset = 0;
+  for (const [value, size] of fields) {
+    if (size === 2) view.setUint16(offset, value, true);
+    if (size === 4) view.setUint32(offset, value, true);
+    offset += size;
+  }
+  return bytes;
+}
+
+function buildZip(entries) {
+  const encoder = new TextEncoder();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const name = encoder.encode(entry.path);
+    const data = entry.bytes;
+    const crc = crc32(data);
+    const { time, day } = dosDateTime(entry.date);
+    const local = zipHeader([
+      [0x04034b50, 4], [20, 2], [0x0800, 2], [0, 2], [time, 2], [day, 2],
+      [crc, 4], [data.length, 4], [data.length, 4], [name.length, 2], [0, 2],
+    ]);
+    parts.push(local, name, data);
+
+    const centralHeader = zipHeader([
+      [0x02014b50, 4], [20, 2], [20, 2], [0x0800, 2], [0, 2], [time, 2], [day, 2],
+      [crc, 4], [data.length, 4], [data.length, 4], [name.length, 2], [0, 2],
+      [0, 2], [0, 2], [0, 2], [0, 4], [offset, 4],
+    ]);
+    central.push(centralHeader, name);
+    offset += local.length + name.length + data.length;
+  }
+
+  const centralSize = central.reduce((sum, part) => sum + part.length, 0);
+  const end = zipHeader([
+    [0x06054b50, 4], [0, 2], [0, 2], [entries.length, 2], [entries.length, 2],
+    [centralSize, 4], [offset, 4], [0, 2],
+  ]);
+  return new Blob([...parts, ...central, end], { type: "application/zip" });
+}
+
+async function downloadClientZip() {
+  const task = state.detail;
+  if (!task) throw new Error("请先选择任务");
+  const fileCount = fileTotal(task);
+  if (!fileCount) throw new Error("当前任务还没有可下载的文件");
+
+  const entries = [];
+  const usedPaths = new Set();
+  let current = 0;
+  toast(`正在读取文件 0/${fileCount}`);
+  for (const submission of task.submissions) {
+    for (const file of submission.files) {
+      current += 1;
+      toast(`正在读取文件 ${current}/${fileCount}`);
+      const response = await fetch(`/api/files/${file.id}/download`, { credentials: "same-origin" });
+      if (response.status === 401) {
+        setAuthed(false);
+        throw new Error("登录已过期，请重新登录");
+      }
+      if (!response.ok) throw new Error(`读取文件失败：${file.storedName}`);
+      entries.push({
+        path: uniqueZipPath(zipEntryPath(task, submission, file), usedPaths),
+        bytes: new Uint8Array(await response.arrayBuffer()),
+        date: new Date(submission.createdAt || Date.now()),
+      });
+    }
+  }
+
+  toast("正在浏览器中生成 ZIP");
+  const blob = buildZip(entries);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${zipSafePathSegment(task.title)}.zip`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  toast("ZIP 已生成", "ok");
+}
+
 async function copyText(text, done = "已复制") {
   if (!text) throw new Error("没有可复制的内容");
   if (!navigator.clipboard) throw new Error("当前浏览器不允许访问剪贴板");
@@ -980,7 +1141,7 @@ function bind() {
   $("#closeFileDialog").addEventListener("click", () => $("#fileDialog").close());
   $("#fileSearch").addEventListener("input", renderFileManager);
   $("#exportCsv").addEventListener("click", safe(() => download(`/api/tasks/${state.current.id}/export.csv`, `${state.current.title}.csv`)));
-  $("#downloadZip").addEventListener("click", safe(() => download(`/api/tasks/${state.current.id}/download.zip`, `${state.current.title}.zip`)));
+  $("#downloadZip").addEventListener("click", safe(downloadClientZip));
 }
 
 fillEditor(null);

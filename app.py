@@ -585,7 +585,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         if match:
             if not require_admin(self):
                 return
-            self.download_zip(int(match.group(1)))
+            send_json(self, {"error": "ZIP 已改为浏览器端打包，请在管理界面点击下载 ZIP"}, HTTPStatus.GONE)
             return
         match = re.fullmatch(r"/api/files/(\d+)", path)
         if match:
