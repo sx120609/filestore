@@ -345,11 +345,20 @@ def validate_submission(task: dict, data: dict, files: list[FieldStorage]) -> li
     return errors
 
 
-def render_name(template: str, data: dict, original_name: str, index: int) -> str:
+def clean_rendered_name(value: str) -> str:
+    value = safe_filename(value)
+    value = re.sub(r"[-_ ]{2,}", "-", value)
+    return value.strip(" -_.") or "file"
+
+
+def render_name(template: str, data: dict, original_name: str, index: int, total_count: int = 1) -> str:
     ext = Path(original_name).suffix
     base_template = template
     values = {key: safe_filename(str(value)) for key, value in data.items()}
-    values.update({"index": str(index), "original": safe_filename(Path(original_name).stem)})
+    values.update({
+        "index": str(index) if total_count > 1 else "",
+        "original": safe_filename(Path(original_name).stem),
+    })
 
     def repl(match: re.Match[str]) -> str:
         key = match.group(1)
@@ -365,10 +374,19 @@ def render_name(template: str, data: dict, original_name: str, index: int) -> st
         return value
 
     rendered = re.sub(r"\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}", repl, base_template)
-    rendered = safe_filename(rendered)
-    if index > 1 and "{index}" not in template:
+    rendered = clean_rendered_name(rendered)
+    if total_count > 1 and "{index}" not in template:
         rendered = f"{rendered}-{index}"
     return f"{rendered}{ext.lower()}"
+
+
+def submission_folder_name(submission: dict) -> str:
+    data = submission.get("data") or {}
+    identity = data.get("student_id") or data.get("name") or f"submission-{submission.get('id', '')}"
+    name = data.get("name", "")
+    if name and identity and name != identity:
+        return clean_rendered_name(f"{name}-{identity}")
+    return clean_rendered_name(identity)
 
 
 def get_task_by_token(token: str) -> dict | None:
@@ -831,8 +849,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             )
             submission_id = cursor.lastrowid
             saved_files = []
+            total_files = len(upload_items)
             for index, item in enumerate(upload_items, start=1):
-                stored_name = render_name(task["renameTemplate"], data, item.filename or "file", index)
+                stored_name = render_name(task["renameTemplate"], data, item.filename or "file", index, total_files)
                 unique_name = f"{submission_id}-{stored_name}"
                 relative = Path("uploads") / str(task["id"]) / unique_name
                 target = ROOT / relative
@@ -886,6 +905,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for item in task["submissions"]:
+                files = item["files"]
+                folder = submission_folder_name(item) if len(files) > 1 else ""
                 for file in item["files"]:
                     row = None
                     with connect() as conn:
@@ -893,7 +914,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                     if row:
                         source = ROOT / row["path"]
                         if source.exists():
-                            archive.write(source, arcname=file["storedName"])
+                            arcname = str(Path(folder) / file["storedName"]) if folder else file["storedName"]
+                            archive.write(source, arcname=arcname)
         body = buffer.getvalue()
         filename = safe_filename(task["title"]) + ".zip"
         self.send_response(HTTPStatus.OK)

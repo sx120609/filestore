@@ -49,6 +49,12 @@ function safeFileName(value) {
     .slice(0, 140) || "file";
 }
 
+function cleanRenderedName(value) {
+  return safeFileName(value)
+    .replace(/[-_ ]{2,}/g, "-")
+    .replace(/^[\s\-_.]+|[\s\-_.]+$/g, "") || "file";
+}
+
 function currentData() {
   const data = {};
   task.fields.forEach((field) => {
@@ -58,12 +64,19 @@ function currentData() {
   return data;
 }
 
-function renamedFileName(file, index) {
+function submissionFolderName() {
+  const data = currentData();
+  const identity = data.student_id || data.name || "提交文件";
+  if (data.name && identity && data.name !== identity) return cleanRenderedName(`${data.name}-${identity}`);
+  return cleanRenderedName(identity);
+}
+
+function renamedFileName(file, index, totalCount = 1) {
   const template = task.renameTemplate || "{name}-{student_id}";
   const data = currentData();
   const values = {
     ...Object.fromEntries(Object.entries(data).map(([key, value]) => [key, safeFileName(value)])),
-    index: String(index),
+    index: totalCount > 1 ? String(index) : "",
     original: safeFileName(originalStem(file.name)),
   };
   const rendered = template.replace(/\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}/g, (_, key, op, rawCount) => {
@@ -73,10 +86,15 @@ function renamedFileName(file, index) {
     if (op === "first") return count > 0 ? value.slice(0, count) : "";
     return value;
   });
-  let base = safeFileName(rendered);
-  if (index > 1 && !template.includes("{index}")) base = `${base}-${index}`;
+  let base = cleanRenderedName(rendered);
+  if (totalCount > 1 && !template.includes("{index}")) base = `${base}-${index}`;
   const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")).toLowerCase() : "";
   return `${base}${ext}`;
+}
+
+function savedPathPreview(file, index, totalCount) {
+  const name = renamedFileName(file, index, totalCount);
+  return totalCount > 1 ? `${submissionFolderName()}/${name}` : name;
 }
 
 function fileIcon(file) {
@@ -121,7 +139,7 @@ function renderFileQueue() {
       ${selectedFiles.map((item, index) => {
         const file = item.file;
         const isImage = file.type.startsWith("image/");
-        const renamed = renamedFileName(file, index + 1);
+        const renamed = savedPathPreview(file, index + 1, selectedFiles.length);
         return `
           <article class="submit-file-card" draggable="true" data-file-id="${escapeHtml(item.id)}">
             <div class="submit-file-title">
