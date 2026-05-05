@@ -91,6 +91,7 @@ button {
   background: #fff;
   cursor: pointer;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
@@ -409,7 +410,26 @@ p { color: var(--muted); }
   display: grid;
   gap: 8px;
 }
-.share-row { flex-wrap: nowrap; }
+.share-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 72px;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.share-label {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.share-row button {
+  width: 72px;
+  min-width: 72px;
+  padding-inline: 0;
+}
 
 .work-grid {
   display: grid;
@@ -1056,8 +1076,18 @@ dialog::backdrop { background: rgba(20, 31, 42, .45); }
   display: grid;
   gap: 3px;
   width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
   color: var(--text);
   font-weight: 700;
+  text-decoration: none;
+}
+
+.status-shortcut a:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .status-shortcut span {
