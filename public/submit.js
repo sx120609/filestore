@@ -108,6 +108,12 @@ function savedPathPreview(file, index, totalCount) {
   return totalCount > 1 ? `${submissionFolderName()}/${name}` : name;
 }
 
+function submitDescription() {
+  const updateTip = "如果提交后发现文件或信息有误，请使用相同的姓名和学号/考试号重新提交，系统会自动用新提交覆盖旧提交。";
+  if (!task.description) return `请按要求填写信息并上传文件。${updateTip}`;
+  return `${task.description}\n${updateTip}`;
+}
+
 function fileIcon(file) {
   const ext = fileExt(file.name);
   if (file.type.startsWith("image/")) return "IMG";
@@ -205,7 +211,7 @@ function renderTask() {
   $("#submitHeader").innerHTML = `
     <p class="eyebrow">${isClosed ? "CLOSED" : "FILE SUBMISSION"}</p>
     <h1>${escapeHtml(task.title)}</h1>
-    <p>${escapeHtml(task.description || "请填写信息并上传要求的文件。")}</p>
+    <p>${escapeHtml(submitDescription()).replaceAll("\n", "<br>")}</p>
     ${task.deadline ? `<p class="hint">截止时间：${new Date(task.deadline).toLocaleString()}</p>` : ""}
   `;
 
