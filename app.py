@@ -75,6 +75,7 @@ def init_db() -> None:
                 fields_json TEXT NOT NULL,
                 file_rules_json TEXT NOT NULL,
                 rename_template TEXT NOT NULL DEFAULT '{name}-{student_id}',
+                folder_template TEXT NOT NULL DEFAULT '{name}-{student_id}',
                 expected_entries TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TEXT NOT NULL
@@ -107,6 +108,9 @@ def init_db() -> None:
             );
             """
         )
+        task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "folder_template" not in task_columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN folder_template TEXT NOT NULL DEFAULT '{name}-{student_id}'")
 
 
 def task_to_dict(row: sqlite3.Row) -> dict:
@@ -119,6 +123,7 @@ def task_to_dict(row: sqlite3.Row) -> dict:
         "fields": json.loads(row["fields_json"]),
         "fileRules": json.loads(row["file_rules_json"]),
         "renameTemplate": row["rename_template"],
+        "folderTemplate": row["folder_template"],
         "expectedEntries": row["expected_entries"],
         "status": row["status"],
         "createdAt": row["created_at"],
@@ -186,6 +191,7 @@ def validate_task_template(template: dict) -> dict:
             "fields": fields,
             "fileRules": template.get("fileRules") or {},
             "renameTemplate": template.get("renameTemplate", "{name}-{student_id}"),
+            "folderTemplate": template.get("folderTemplate", "{name}-{student_id}"),
             "expectedEntries": "",
         }
     )
@@ -195,6 +201,7 @@ def validate_task_template(template: dict) -> dict:
         "fields": normalized["fields"],
         "fileRules": normalized["fileRules"],
         "renameTemplate": normalized["renameTemplate"],
+        "folderTemplate": normalized["folderTemplate"],
     }
 
 
@@ -298,6 +305,7 @@ def normalize_task_payload(payload: dict) -> dict:
             "maxCount": max_count,
         },
         "renameTemplate": str(payload.get("renameTemplate", "{name}-{student_id}")).strip() or "{name}",
+        "folderTemplate": str(payload.get("folderTemplate", "{name}-{student_id}")).strip() or "{name}",
         "expectedEntries": str(payload.get("expectedEntries", "")).strip(),
         "status": str(payload.get("status", "open")).strip() or "open",
     }
@@ -351,9 +359,7 @@ def clean_rendered_name(value: str) -> str:
     return value.strip(" -_.") or "file"
 
 
-def render_name(template: str, data: dict, original_name: str, index: int, total_count: int = 1) -> str:
-    ext = Path(original_name).suffix
-    base_template = template
+def render_template_base(template: str, data: dict, original_name: str = "", index: int = 1, total_count: int = 1) -> str:
     values = {key: safe_filename(str(value)) for key, value in data.items()}
     values.update({
         "index": str(index) if total_count > 1 else "",
@@ -373,20 +379,22 @@ def render_name(template: str, data: dict, original_name: str, index: int, total
             return value[:count] if count > 0 else ""
         return value
 
-    rendered = re.sub(r"\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}", repl, base_template)
-    rendered = clean_rendered_name(rendered)
+    rendered = re.sub(r"\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}", repl, template)
+    return clean_rendered_name(rendered)
+
+
+def render_name(template: str, data: dict, original_name: str, index: int, total_count: int = 1) -> str:
+    ext = Path(original_name).suffix
+    rendered = render_template_base(template, data, original_name, index, total_count)
     if total_count > 1 and "{index}" not in template:
         rendered = f"{rendered}-{index}"
     return f"{rendered}{ext.lower()}"
 
 
-def submission_folder_name(submission: dict) -> str:
+def submission_folder_name(task: dict, submission: dict) -> str:
     data = submission.get("data") or {}
-    identity = data.get("student_id") or data.get("name") or f"submission-{submission.get('id', '')}"
-    name = data.get("name", "")
-    if name and identity and name != identity:
-        return clean_rendered_name(f"{name}-{identity}")
-    return clean_rendered_name(identity)
+    template = task.get("folderTemplate") or "{name}-{student_id}"
+    return render_template_base(template, data) or clean_rendered_name(f"submission-{submission.get('id', '')}")
 
 
 def get_task_by_token(token: str) -> dict | None:
@@ -563,7 +571,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             if not task:
                 send_json(self, {"error": "提交链接不存在"}, HTTPStatus.NOT_FOUND)
                 return
-            public_task = {key: task[key] for key in ["title", "description", "deadline", "fields", "fileRules", "renameTemplate", "status"]}
+            public_task = {key: task[key] for key in ["title", "description", "deadline", "fields", "fileRules", "renameTemplate", "folderTemplate", "status"]}
             public_task["siteTitle"] = get_setting("site_title", "Filestore")
             send_json(self, public_task)
             return
@@ -690,8 +698,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                     """
                     INSERT INTO tasks (
                         token, title, description, deadline, fields_json, file_rules_json,
-                        rename_template, expected_entries, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        rename_template, folder_template, expected_entries, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         token,
@@ -701,6 +709,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                         json.dumps(payload["fields"], ensure_ascii=False),
                         json.dumps(payload["fileRules"], ensure_ascii=False),
                         payload["renameTemplate"],
+                        payload["folderTemplate"],
                         payload["expectedEntries"],
                         payload["status"],
                         now_iso(),
@@ -732,7 +741,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     """
                     UPDATE tasks
                     SET title = ?, description = ?, deadline = ?, fields_json = ?,
-                        file_rules_json = ?, rename_template = ?, expected_entries = ?, status = ?
+                        file_rules_json = ?, rename_template = ?, folder_template = ?, expected_entries = ?, status = ?
                     WHERE id = ?
                     """,
                     (
@@ -742,6 +751,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                         json.dumps(payload["fields"], ensure_ascii=False),
                         json.dumps(payload["fileRules"], ensure_ascii=False),
                         payload["renameTemplate"],
+                        payload["folderTemplate"],
                         payload["expectedEntries"],
                         payload["status"],
                         task_id,
@@ -906,7 +916,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for item in task["submissions"]:
                 files = item["files"]
-                folder = submission_folder_name(item) if len(files) > 1 else ""
+                folder = submission_folder_name(task, item) if len(files) > 1 else ""
                 for file in item["files"]:
                     row = None
                     with connect() as conn:

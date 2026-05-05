@@ -19,6 +19,7 @@ const builtInTemplates = {
     ],
     fileRules: { allowedTypes: ["pdf", "doc", "docx", "jpg", "png", "zip"], maxSizeMb: 20, maxCount: 1 },
     renameTemplate: "{name}-{student_id}",
+    folderTemplate: "{name}-{student_id}",
   },
   "builtin:exam": {
     name: "考试号模板",
@@ -28,6 +29,7 @@ const builtInTemplates = {
     ],
     fileRules: { allowedTypes: ["pdf", "doc", "docx", "jpg", "png", "zip"], maxSizeMb: 20, maxCount: 1 },
     renameTemplate: "{name}-{student_id}",
+    folderTemplate: "{name}-{student_id}",
   },
 };
 
@@ -286,6 +288,7 @@ function applyTemplate(template = selectedTemplate()?.template) {
   $("#maxSizeMb").value = template.fileRules?.maxSizeMb || 20;
   $("#maxCount").value = template.fileRules?.maxCount || 1;
   $("#renameTemplate").value = template.renameTemplate || "{name}-{student_id}";
+  $("#folderTemplate").value = template.folderTemplate || "{name}-{student_id}";
   updateRenamePreview();
   toast("模板已应用", "ok");
 }
@@ -321,8 +324,12 @@ function renderRenameFieldOptions() {
   select.innerHTML = options.join("");
 }
 
-function renderRenameTemplate(template, sampleData, originalName = "材料.pdf", index = 1) {
-  const values = { ...sampleData, original: "材料", index: String(index) };
+function cleanRenderedName(value) {
+  return String(value || "file").replace(/[-_ ]{2,}/g, "-").replace(/^[\s\-_.]+|[\s\-_.]+$/g, "") || "file";
+}
+
+function renderRenameTemplate(template, sampleData, originalName = "材料.pdf", index = 1, totalCount = 1) {
+  const values = { ...sampleData, original: "材料", index: totalCount > 1 ? String(index) : "" };
   const rendered = template.replace(/\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}/g, (_, key, op, rawCount) => {
     const value = String(values[key] || "");
     const count = Number(rawCount || 0);
@@ -331,16 +338,22 @@ function renderRenameTemplate(template, sampleData, originalName = "材料.pdf",
     return value;
   }).trim();
   const ext = originalName.includes(".") ? originalName.slice(originalName.lastIndexOf(".")) : "";
-  return `${rendered || "文件"}${ext}`;
+  return `${cleanRenderedName(rendered)}${ext}`;
 }
 
 function updateRenamePreview() {
   const preview = $("#renamePreview");
-  if (!preview) return;
+  const folderPreview = $("#folderPreview");
+  if (!preview || !folderPreview) return;
   const fields = collectFields();
   const sampleData = Object.fromEntries(fields.map((field) => [field.key, fieldSampleValue(field)]));
   const template = $("#renameTemplate").value.trim() || "{name}-{student_id}";
-  preview.textContent = `预览：${renderRenameTemplate(template, sampleData)}`;
+  const folderTemplate = $("#folderTemplate").value.trim() || "{name}-{student_id}";
+  const firstName = renderRenameTemplate(template, sampleData, "材料.jpg", 1, 3);
+  const secondName = renderRenameTemplate(template, sampleData, "材料.jpg", 2, 3);
+  const folderName = renderRenameTemplate(folderTemplate, sampleData, "", 1, 1);
+  preview.textContent = `文件预览：单文件 ${renderRenameTemplate(template, sampleData)}；多文件 ${firstName}、${secondName}`;
+  folderPreview.textContent = `文件夹预览：${folderName}/`;
 }
 
 function insertAtCursor(input, text) {
@@ -375,6 +388,7 @@ function editorPayload() {
       maxCount: $("#maxCount").value,
     },
     renameTemplate: $("#renameTemplate").value.trim(),
+    folderTemplate: $("#folderTemplate").value.trim(),
     expectedEntries: $("#expectedEntries").value,
   };
 }
@@ -389,6 +403,7 @@ function templatePayload() {
       maxCount: Number(payload.fileRules.maxCount || 1),
     },
     renameTemplate: payload.renameTemplate,
+    folderTemplate: payload.folderTemplate,
   };
 }
 
@@ -403,6 +418,7 @@ function fillEditor(task) {
   $("#maxSizeMb").value = task?.fileRules?.maxSizeMb || 20;
   $("#maxCount").value = task?.fileRules?.maxCount || 1;
   $("#renameTemplate").value = task?.renameTemplate || "{name}-{student_id}";
+  $("#folderTemplate").value = task?.folderTemplate || "{name}-{student_id}";
   $("#expectedEntries").value = task?.expectedEntries || "";
   setFields(task?.fields?.length ? task.fields : defaultFields());
   updateRenamePreview();
@@ -642,7 +658,8 @@ function renderRules(task) {
     <dt>字段</dt><dd>${task.fields.map((field) => escapeHtml(field.label)).join("、")}</dd>
     <dt>文件类型</dt><dd>${normalizeAllowedTypes(rules.allowedTypes).join(", ") || "不限"}</dd>
     <dt>大小/数量</dt><dd>${rules.maxSizeMb} MB · 最多 ${rules.maxCount} 个</dd>
-    <dt>命名</dt><dd>${escapeHtml(task.renameTemplate)}</dd>
+    <dt>文件命名</dt><dd>${escapeHtml(task.renameTemplate)}</dd>
+    <dt>文件夹</dt><dd>${escapeHtml(task.folderTemplate || "{name}-{student_id}")}</dd>
     <dt>截止</dt><dd>${task.deadline ? new Date(task.deadline).toLocaleString() : "未设置"}</dd>
   `;
 }
@@ -921,12 +938,14 @@ function bind() {
     updateRenamePreview();
   });
   $("#renameTemplate").addEventListener("input", updateRenamePreview);
+  $("#folderTemplate").addEventListener("input", updateRenamePreview);
   $$(".rename-token").forEach((button) => {
     button.addEventListener("click", () => insertAtCursor($("#renameTemplate"), button.dataset.token || ""));
   });
   $("#insertRenameField").addEventListener("click", safe(() => insertAtCursor($("#renameTemplate"), renameFieldToken())));
   $("#resetRenameTemplate").addEventListener("click", () => {
     $("#renameTemplate").value = "{name}-{student_id}";
+    $("#folderTemplate").value = "{name}-{student_id}";
     updateRenamePreview();
   });
   $("#templateSelect").addEventListener("change", () => {

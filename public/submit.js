@@ -59,16 +59,27 @@ function currentData() {
   const data = {};
   task.fields.forEach((field) => {
     const input = document.querySelector(`[name="${CSS.escape(field.key)}"]`);
-    data[field.key] = input?.value.trim() || field.placeholder || field.label || "";
+    data[field.key] = input?.value.trim() || field.label || "";
   });
   return data;
 }
 
 function submissionFolderName() {
   const data = currentData();
-  const identity = data.student_id || data.name || "提交文件";
-  if (data.name && identity && data.name !== identity) return cleanRenderedName(`${data.name}-${identity}`);
-  return cleanRenderedName(identity);
+  const template = task.folderTemplate || "{name}-{student_id}";
+  const values = {
+    ...Object.fromEntries(Object.entries(data).map(([key, value]) => [key, safeFileName(value)])),
+    index: "",
+    original: "",
+  };
+  const rendered = template.replace(/\{([a-zA-Z0-9_]+)(?:\|(last|first):(\d{1,2}))?\}/g, (_, key, op, rawCount) => {
+    const value = String(values[key] || "");
+    const count = Number(rawCount || 0);
+    if (op === "last") return count > 0 ? value.slice(-count) : "";
+    if (op === "first") return count > 0 ? value.slice(0, count) : "";
+    return value;
+  });
+  return cleanRenderedName(rendered || "提交文件");
 }
 
 function renamedFileName(file, index, totalCount = 1) {

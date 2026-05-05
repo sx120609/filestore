@@ -172,6 +172,9 @@
         <label>文件命名规则
           <input id="renameTemplate" value="{name}-{student_id}">
         </label>
+        <label>文件夹命名规则
+          <input id="folderTemplate" value="{name}-{student_id}">
+        </label>
         <div class="rename-tools">
           <button type="button" class="chip rename-token" data-token="{name}">姓名</button>
           <button type="button" class="chip rename-token" data-token="{student_id}">学号/考试号</button>
@@ -191,6 +194,7 @@
           <button type="button" id="insertRenameField" class="chip">插入</button>
         </div>
         <p id="renamePreview" class="rename-preview"></p>
+        <p id="folderPreview" class="rename-preview"></p>
         <p class="hint">常用命名可以直接点上面的按钮。高级写法：{student_id|last:2} 表示取学号/考试号后 2 位。</p>
       </div>
     </section>
