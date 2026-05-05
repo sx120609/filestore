@@ -913,7 +913,7 @@ dialog::backdrop { background: rgba(20, 31, 42, .45); }
 .submit-file-card {
   position: relative;
   display: grid;
-  grid-template-rows: auto 190px auto auto;
+  grid-template-rows: auto auto auto auto;
   gap: 9px;
   min-width: 0;
   padding: 10px;
@@ -971,17 +971,25 @@ dialog::backdrop { background: rgba(20, 31, 42, .45); }
 }
 
 .submit-file-preview {
+  position: relative;
   display: grid;
   place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  min-height: 180px;
   overflow: hidden;
   border-radius: 8px;
   background: #fff;
 }
 
 .submit-file-preview img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
+  display: block;
 }
 
 .submit-file-icon {
@@ -1257,7 +1265,12 @@ progress {
   }
 
   .submit-file-card {
-    grid-template-rows: auto 190px auto auto;
+    grid-template-rows: auto auto auto auto;
+  }
+
+  .submit-file-preview {
+    aspect-ratio: 1 / 1;
+    min-height: 0;
   }
 }
 
