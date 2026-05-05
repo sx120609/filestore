@@ -169,32 +169,53 @@
         <label>数量<input id="maxCount" type="number" min="1" value="1"></label>
       </div>
       <div class="rename-builder">
-        <label>文件命名规则
-          <input id="renameTemplate" value="{name}-{student_id}">
-        </label>
-        <label>文件夹命名规则
-          <input id="folderTemplate" value="{name}-{student_id}">
-        </label>
-        <div class="rename-tools">
-          <button type="button" class="chip rename-token" data-token="{name}">姓名</button>
-          <button type="button" class="chip rename-token" data-token="{student_id}">学号/考试号</button>
-          <button type="button" class="chip rename-token" data-token="{student_id|last:2}">编号后 2 位</button>
-          <button type="button" class="chip rename-token" data-token="{original}">原文件名</button>
-          <button type="button" class="chip rename-token" data-token="{index}">序号</button>
-          <button type="button" id="resetRenameTemplate" class="chip">恢复默认</button>
+        <div class="rename-panel" data-rename-panel="file">
+          <label>文件命名规则
+            <input id="renameTemplate" value="{name}-{student_id}">
+          </label>
+          <div class="rename-tools">
+            <button type="button" class="chip rename-token" data-target="renameTemplate" data-token="{name}">姓名</button>
+            <button type="button" class="chip rename-token" data-target="renameTemplate" data-token="{student_id}">学号/考试号</button>
+            <button type="button" class="chip rename-token" data-target="renameTemplate" data-token="{student_id|last:2}">编号后 2 位</button>
+            <button type="button" class="chip rename-token" data-target="renameTemplate" data-token="{original}">原文件名</button>
+            <button type="button" class="chip rename-token" data-target="renameTemplate" data-token="{index}">序号</button>
+            <button type="button" class="chip reset-rename-template" data-target="renameTemplate">恢复默认</button>
+          </div>
+          <div class="rename-custom">
+            <select class="rename-field-select" data-target="renameTemplate" title="选择字段"></select>
+            <select class="rename-slice-mode" data-target="renameTemplate" title="截取方式">
+              <option value="">完整内容</option>
+              <option value="last">后几位</option>
+              <option value="first">前几位</option>
+            </select>
+            <input class="rename-slice-count" data-target="renameTemplate" type="number" min="1" max="20" value="2" title="位数">
+            <button type="button" class="chip insert-rename-field" data-target="renameTemplate">插入</button>
+          </div>
+          <p id="renamePreview" class="rename-preview"></p>
         </div>
-        <div class="rename-custom">
-          <select id="renameFieldSelect" title="选择字段"></select>
-          <select id="renameSliceMode" title="截取方式">
-            <option value="">完整内容</option>
-            <option value="last">后几位</option>
-            <option value="first">前几位</option>
-          </select>
-          <input id="renameSliceCount" type="number" min="1" max="20" value="2" title="位数">
-          <button type="button" id="insertRenameField" class="chip">插入</button>
+
+        <div class="rename-panel" data-rename-panel="folder">
+          <label>文件夹命名规则
+            <input id="folderTemplate" value="{name}-{student_id}">
+          </label>
+          <div class="rename-tools">
+            <button type="button" class="chip rename-token" data-target="folderTemplate" data-token="{name}">姓名</button>
+            <button type="button" class="chip rename-token" data-target="folderTemplate" data-token="{student_id}">学号/考试号</button>
+            <button type="button" class="chip rename-token" data-target="folderTemplate" data-token="{student_id|last:2}">编号后 2 位</button>
+            <button type="button" class="chip reset-rename-template" data-target="folderTemplate">恢复默认</button>
+          </div>
+          <div class="rename-custom">
+            <select class="rename-field-select" data-target="folderTemplate" title="选择字段"></select>
+            <select class="rename-slice-mode" data-target="folderTemplate" title="截取方式">
+              <option value="">完整内容</option>
+              <option value="last">后几位</option>
+              <option value="first">前几位</option>
+            </select>
+            <input class="rename-slice-count" data-target="folderTemplate" type="number" min="1" max="20" value="2" title="位数">
+            <button type="button" class="chip insert-rename-field" data-target="folderTemplate">插入</button>
+          </div>
+          <p id="folderPreview" class="rename-preview"></p>
         </div>
-        <p id="renamePreview" class="rename-preview"></p>
-        <p id="folderPreview" class="rename-preview"></p>
         <p class="hint">常用命名可以直接点上面的按钮。高级写法：{student_id|last:2} 表示取学号/考试号后 2 位。</p>
       </div>
     </section>

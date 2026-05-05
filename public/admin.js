@@ -313,15 +313,15 @@ function fieldSampleValue(field) {
 }
 
 function renderRenameFieldOptions() {
-  const select = $("#renameFieldSelect");
-  if (!select) return;
   const fields = collectFields().filter((field) => field.key);
   const options = [
     ...fields.map((field) => `<option value="${escapeHtml(field.key)}">${escapeHtml(field.label || field.key)}</option>`),
     "<option value=\"original\">原文件名</option>",
     "<option value=\"index\">序号</option>",
   ];
-  select.innerHTML = options.join("");
+  $$(".rename-field-select").forEach((select) => {
+    select.innerHTML = options.join("");
+  });
 }
 
 function cleanRenderedName(value) {
@@ -365,10 +365,13 @@ function insertAtCursor(input, text) {
   updateRenamePreview();
 }
 
-function renameFieldToken() {
-  const key = $("#renameFieldSelect").value;
-  const mode = $("#renameSliceMode").value;
-  const count = Math.min(20, Math.max(1, Number($("#renameSliceCount").value || 2)));
+function renameFieldToken(targetId) {
+  const select = document.querySelector(`.rename-field-select[data-target="${targetId}"]`);
+  const modeSelect = document.querySelector(`.rename-slice-mode[data-target="${targetId}"]`);
+  const countInput = document.querySelector(`.rename-slice-count[data-target="${targetId}"]`);
+  const key = select?.value || "";
+  const mode = modeSelect?.value || "";
+  const count = Math.min(20, Math.max(1, Number(countInput?.value || 2)));
   if (!key) throw new Error("请选择要插入的字段");
   if (mode && key === "index") throw new Error("序号不需要截取位数");
   return mode ? `{${key}|${mode}:${count}}` : `{${key}}`;
@@ -940,13 +943,16 @@ function bind() {
   $("#renameTemplate").addEventListener("input", updateRenamePreview);
   $("#folderTemplate").addEventListener("input", updateRenamePreview);
   $$(".rename-token").forEach((button) => {
-    button.addEventListener("click", () => insertAtCursor($("#renameTemplate"), button.dataset.token || ""));
+    button.addEventListener("click", () => insertAtCursor($(`#${button.dataset.target}`), button.dataset.token || ""));
   });
-  $("#insertRenameField").addEventListener("click", safe(() => insertAtCursor($("#renameTemplate"), renameFieldToken())));
-  $("#resetRenameTemplate").addEventListener("click", () => {
-    $("#renameTemplate").value = "{name}-{student_id}";
-    $("#folderTemplate").value = "{name}-{student_id}";
-    updateRenamePreview();
+  $$(".insert-rename-field").forEach((button) => {
+    button.addEventListener("click", safe(() => insertAtCursor($(`#${button.dataset.target}`), renameFieldToken(button.dataset.target))));
+  });
+  $$(".reset-rename-template").forEach((button) => {
+    button.addEventListener("click", () => {
+      $(`#${button.dataset.target}`).value = "{name}-{student_id}";
+      updateRenamePreview();
+    });
   });
   $("#templateSelect").addEventListener("change", () => {
     state.templateKey = $("#templateSelect").value;

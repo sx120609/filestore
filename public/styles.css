@@ -547,8 +547,18 @@ p { color: var(--muted); }
 
 .rename-builder {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+}
+
+.rename-panel {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
 }
 
 .rename-tools,
@@ -570,7 +580,7 @@ p { color: var(--muted); }
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--surface-2);
+  background: #fff;
   color: #334252;
   font-size: 13px;
   font-weight: 800;
