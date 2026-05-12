@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import mimetypes
@@ -10,16 +11,12 @@ import secrets
 import shutil
 import sqlite3
 import string
-import warnings
-import zipfile
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from urllib.parse import quote, urlparse
-
-warnings.filterwarnings("ignore", message="'cgi' is deprecated.*", category=DeprecationWarning)
-from cgi import FieldStorage
 
 
 ROOT = Path(__file__).resolve().parent
@@ -41,6 +38,160 @@ def safe_filename(value: str) -> str:
     cleaned = "".join(ch if ch in allowed or "\u4e00" <= ch <= "\u9fff" else "_" for ch in value)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
     return cleaned[:140] or "file"
+
+
+_BOUNDARY_PARAM_RE = re.compile(r'boundary=("([^"]+)"|([^;\s]+))', re.IGNORECASE)
+_CONTENT_DISP_RE = re.compile(
+    r'^Content-Disposition:\s*form-data\s*;\s*name="([^"]*)"(?:\s*;\s*filename="([^"]*)")?',
+    re.IGNORECASE,
+)
+_CONTENT_TYPE_RE = re.compile(r'^Content-Type:\s*(.+?)\s*$', re.IGNORECASE)
+
+
+class UploadPart:
+    """\u590d\u523b cgi.FieldStorage \u5bf9\u5916\u66b4\u9732\u7684\u5c5e\u6027\u5b50\u96c6\u3002
+
+    - filename:  \u6587\u4ef6\u540d\uff1b\u666e\u901a\u5b57\u6bb5\u4e3a None
+    - type:      MIME \u7c7b\u578b
+    - file:      SpooledTemporaryFile\uff0c\u53ef seek/read/tell
+    - value:     \u666e\u901a\u5b57\u6bb5\u7684\u5b57\u7b26\u4e32\u5185\u5bb9\uff08\u61d2\u89e3\u7801\uff09
+    """
+
+    __slots__ = ("name", "filename", "type", "file", "_value_cache")
+
+    def __init__(self, name: str, filename: str | None, content_type: str, file: SpooledTemporaryFile) -> None:
+        self.name = name
+        self.filename = filename
+        self.type = content_type
+        self.file = file
+        self._value_cache: str | None = None
+
+    @property
+    def value(self) -> str:
+        if self._value_cache is None:
+            self.file.seek(0)
+            self._value_cache = self.file.read().decode("utf-8", errors="replace")
+            self.file.seek(0)
+        return self._value_cache
+
+
+class _MultipartReader:
+    """\u6eda\u52a8\u7f13\u51b2\u533a\uff0c\u4ece rfile \u6d41\u5f0f\u6309\u9700\u8bfb\u53d6\u5b57\u8282\u3002"""
+
+    def __init__(self, fp, total: int, chunk_size: int = 64 * 1024) -> None:
+        self.fp = fp
+        self.remaining = total
+        self.chunk_size = chunk_size
+        self.buf = b""
+
+    def fill(self, target: int) -> None:
+        while len(self.buf) < target and self.remaining > 0:
+            want = min(self.chunk_size, self.remaining)
+            chunk = self.fp.read(want)
+            if not chunk:
+                self.remaining = 0
+                break
+            self.buf += chunk
+            self.remaining -= len(chunk)
+
+    def readline(self, maxlen: int = 8192) -> bytes:
+        """\u8bfb\u53d6\u4e0b\u4e00\u884c\uff08\u4e0d\u542b CRLF\uff09\u3002"""
+        while True:
+            idx = self.buf.find(b"\r\n")
+            if idx >= 0:
+                line = self.buf[:idx]
+                self.buf = self.buf[idx + 2:]
+                return line
+            if len(self.buf) > maxlen:
+                raise ValueError("multipart \u5934\u90e8\u884c\u8fc7\u957f")
+            if self.remaining <= 0:
+                raise ValueError("multipart \u63d0\u524d\u7ed3\u675f\uff08\u8bfb\u53d6\u5934\u90e8\u65f6\uff09")
+            self.fill(len(self.buf) + self.chunk_size)
+
+
+def parse_multipart(rfile, content_type: str, content_length: int) -> dict[str, list[UploadPart]]:
+    """\u6d41\u5f0f\u89e3\u6790 multipart/form-data \u8bf7\u6c42\u4f53\u3002\u96f6\u4f9d\u8d56\uff0c\u66ff\u4ee3 cgi.FieldStorage\u3002
+
+    \u8fd4\u56de dict[\u5b57\u6bb5\u540d, list[UploadPart]]\u3002\u540c\u540d\u5b57\u6bb5\uff08\u5982\u591a\u6587\u4ef6\u4e0a\u4f20 name="files"\uff09\u4fdd\u7559\u4e3a\u5217\u8868\u3002
+
+    \u629b ValueError \u8868\u793a\u683c\u5f0f\u9519\u8bef\u6216\u4f53\u79ef\u8d85\u9650\u3002
+    """
+    if content_length <= 0:
+        raise ValueError("\u8bf7\u6c42\u4f53\u4e3a\u7a7a")
+    if content_length > MAX_REQUEST_BYTES:
+        raise ValueError("\u8bf7\u6c42\u4f53\u8fc7\u5927")
+
+    match = _BOUNDARY_PARAM_RE.search(content_type or "")
+    if not match:
+        raise ValueError("\u7f3a\u5c11 multipart boundary")
+    boundary = (match.group(2) or match.group(3)).encode("ascii")
+    delimiter = b"--" + boundary
+    sep = b"\r\n" + delimiter
+
+    reader = _MultipartReader(rfile, content_length)
+
+    first = reader.readline()
+    if first == delimiter + b"--":
+        return {}
+    if first != delimiter:
+        raise ValueError("multipart \u5f00\u5934\u4e0d\u662f\u5206\u9694\u7b26")
+
+    parts: dict[str, list[UploadPart]] = {}
+
+    while True:
+        headers: list[str] = []
+        while True:
+            line = reader.readline()
+            if line == b"":
+                break
+            headers.append(line.decode("utf-8", errors="replace"))
+
+        name: str | None = None
+        filename: str | None = None
+        ctype = ""
+        for h in headers:
+            m = _CONTENT_DISP_RE.match(h)
+            if m:
+                name = m.group(1)
+                filename = m.group(2)
+                continue
+            m = _CONTENT_TYPE_RE.match(h)
+            if m:
+                ctype = m.group(1)
+        if name is None:
+            raise ValueError("multipart part \u7f3a\u5c11 name")
+
+        spool: SpooledTemporaryFile = SpooledTemporaryFile(max_size=1024 * 1024)
+        while True:
+            reader.fill(len(sep) + reader.chunk_size)
+            idx = reader.buf.find(sep)
+            if idx >= 0:
+                spool.write(reader.buf[:idx])
+                reader.buf = reader.buf[idx + len(sep):]
+                break
+            # \u6ca1\u627e\u5230\u5b8c\u6574 sep\uff1a\u4fdd\u7559\u6700\u540e len(sep)-1 \u5b57\u8282\u9632\u6b62 sep \u8de8\u8fb9\u754c\uff0c\u5176\u4f59\u5199\u5165 part
+            keep = len(sep) - 1
+            if len(reader.buf) > keep:
+                spool.write(reader.buf[:-keep])
+                reader.buf = reader.buf[-keep:]
+            if reader.remaining <= 0:
+                raise ValueError("multipart \u63d0\u524d\u7ed3\u675f\uff08\u8bfb\u53d6\u5185\u5bb9\u65f6\uff09")
+
+        spool.seek(0)
+        parts.setdefault(name, []).append(UploadPart(name, filename, ctype, spool))
+
+        # \u5206\u9694\u7b26\u540e\u5fc5\u987b\u662f "\r\n"\uff08\u4e0b\u4e00\u6bb5\uff09\u6216 "--"\uff08\u7ed3\u675f\uff0c\u540e\u53ef\u80fd\u8ddf \r\n\uff09
+        reader.fill(2)
+        if len(reader.buf) < 2:
+            raise ValueError("multipart \u672b\u5c3e\u4e0d\u5b8c\u6574")
+        suffix = reader.buf[:2]
+        reader.buf = reader.buf[2:]
+        if suffix == b"--":
+            break
+        if suffix != b"\r\n":
+            raise ValueError("multipart \u5206\u9694\u7b26\u540e\u5b57\u7b26\u975e\u6cd5")
+
+    return parts
 
 
 def read_json_body(handler: SimpleHTTPRequestHandler) -> dict:
@@ -139,6 +290,57 @@ def get_setting(key: str, default: str = "") -> str:
 
 def admin_password() -> str:
     return get_setting("admin_password", ADMIN_PASSWORD)
+
+
+# scrypt 参数：n=16384, r=8, p=1 是 OWASP 推荐的轻量级配置，
+# 单次哈希约 50-100ms，对单管理员密码场景足够。
+_SCRYPT_N = 16384
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_DKLEN = 64
+
+
+def hash_password(plaintext: str) -> str:
+    """生成 scrypt 哈希，格式：scrypt$n$r$p$<salt_hex>$<hash_hex>。"""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        plaintext.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN,
+    )
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${digest.hex()}"
+
+
+def verify_password(plaintext: str, stored: str) -> bool:
+    """验证密码。兼容两种 stored：
+    - "scrypt$..." 格式 → 用 scrypt 验证
+    - 其他（明文）→ 直接比较，用于初次安装/旧版本兼容
+    """
+    if not stored:
+        return False
+    if not stored.startswith("scrypt$"):
+        return secrets.compare_digest(plaintext, stored)
+    try:
+        _, n_s, r_s, p_s, salt_hex, hash_hex = stored.split("$")
+        n = int(n_s)
+        r = int(r_s)
+        p = int(p_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except (ValueError, AttributeError):
+        return False
+    actual = hashlib.scrypt(
+        plaintext.encode("utf-8"),
+        salt=salt,
+        n=n,
+        r=r,
+        p=p,
+        dklen=len(expected),
+    )
+    return secrets.compare_digest(actual, expected)
 
 
 def set_setting(key: str, value: str) -> None:
@@ -311,7 +513,7 @@ def normalize_task_payload(payload: dict) -> dict:
     }
 
 
-def validate_submission(task: dict, data: dict, files: list[FieldStorage]) -> list[str]:
+def validate_submission(task: dict, data: dict, files: list[UploadPart]) -> list[str]:
     errors = []
     if task["status"] != "open":
         errors.append("任务未开放提交")
@@ -686,7 +888,13 @@ class AppHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         if path == "/api/admin/login":
             payload = read_json_body(self)
-            if secrets.compare_digest(str(payload.get("password", "")), admin_password()):
+            attempt = str(payload.get("password", ""))
+            if verify_password(attempt, admin_password()):
+                # 自动升级：如果 settings 表里还是明文（旧版本或首次启动用 env 默认），
+                # 现在落库为 scrypt 哈希
+                current_stored = get_setting("admin_password", "")
+                if not current_stored.startswith("scrypt$"):
+                    set_setting("admin_password", hash_password(attempt))
                 session = secrets.token_urlsafe(32)
                 SESSIONS.add(session)
                 send_json(
@@ -705,13 +913,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             payload = read_json_body(self)
             current = str(payload.get("currentPassword", ""))
             new_password = str(payload.get("newPassword", ""))
-            if not secrets.compare_digest(current, admin_password()):
+            if not verify_password(current, admin_password()):
                 send_json(self, {"error": "当前密码错误"}, HTTPStatus.BAD_REQUEST)
                 return
             if len(new_password) < 6:
                 send_json(self, {"error": "新密码至少需要 6 位"}, HTTPStatus.BAD_REQUEST)
                 return
-            set_setting("admin_password", new_password)
+            set_setting("admin_password", hash_password(new_password))
             SESSIONS.clear()
             send_json(
                 self,
@@ -849,12 +1057,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         if task_match:
             task_id = int(task_match.group(1))
             with connect() as conn:
-                submission_rows = conn.execute("SELECT id FROM submissions WHERE task_id = ?", (task_id,)).fetchall()
-                submission_ids = [row["id"] for row in submission_rows]
-                if submission_ids:
-                    marks = ",".join("?" for _ in submission_ids)
-                    conn.execute(f"DELETE FROM files WHERE submission_id IN ({marks})", submission_ids)
-                    conn.execute(f"DELETE FROM submissions WHERE id IN ({marks})", submission_ids)
+                # 依赖 schema 中的 ON DELETE CASCADE + PRAGMA foreign_keys=ON
+                # 删除任务会自动级联清理 submissions 和 files 两张表
                 cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
             delete_task_files(task_id)
             if cursor.rowcount == 0:
@@ -867,8 +1071,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         if match:
             submission_id = int(match.group(1))
             with connect() as conn:
+                # 先查文件路径用于磁盘清理，再删 submission（CASCADE 自动删 files 表行）
                 files = conn.execute("SELECT path FROM files WHERE submission_id = ?", (submission_id,)).fetchall()
-                conn.execute("DELETE FROM files WHERE submission_id = ?", (submission_id,))
                 conn.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
             for row in files:
                 path = ROOT / row["path"]
@@ -899,17 +1103,24 @@ class AppHandler(SimpleHTTPRequestHandler):
             send_json(self, {"error": "提交链接不存在"}, HTTPStatus.NOT_FOUND)
             return
 
-        form = FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"})
-        data = {}
-        upload_items = []
-        for key in form.keys():
-            item = form[key]
-            items = item if isinstance(item, list) else [item]
-            for entry in items:
+        try:
+            parts = parse_multipart(
+                self.rfile,
+                self.headers.get("Content-Type", ""),
+                int(self.headers.get("Content-Length", "0")),
+            )
+        except ValueError as exc:
+            send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        data: dict[str, str] = {}
+        upload_items: list[UploadPart] = []
+        for entries in parts.values():
+            for entry in entries:
                 if entry.filename:
                     upload_items.append(entry)
                 else:
-                    data[key] = entry.value
+                    data[entry.name] = entry.value
 
         errors = validate_submission(task, data, upload_items)
         if errors:
@@ -978,34 +1189,6 @@ class AppHandler(SimpleHTTPRequestHandler):
         filename = safe_filename(task["title"]) + ".csv"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/csv; charset=utf-8")
-        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def download_zip(self, task_id: int) -> None:
-        task = build_task_detail(task_id)
-        if not task:
-            send_json(self, {"error": "任务不存在"}, HTTPStatus.NOT_FOUND)
-            return
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            for item in task["submissions"]:
-                files = item["files"]
-                folder = submission_folder_name(task, item) if len(files) > 1 else ""
-                for file in item["files"]:
-                    row = None
-                    with connect() as conn:
-                        row = conn.execute("SELECT path FROM files WHERE id = ?", (file["id"],)).fetchone()
-                    if row:
-                        source = ROOT / row["path"]
-                        if source.exists():
-                            arcname = str(Path(folder) / file["storedName"]) if folder else file["storedName"]
-                            archive.write(source, arcname=arcname)
-        body = buffer.getvalue()
-        filename = safe_filename(task["title"]) + ".zip"
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
