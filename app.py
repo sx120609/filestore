@@ -435,22 +435,28 @@ def send_json(
     extra_headers: dict[str, str] | None = None,
 ) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    for key, value in (extra_headers or {}).items():
-        handler.send_header(key, value)
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        for key, value in (extra_headers or {}).items():
+            handler.send_header(key, value)
+        handler.end_headers()
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+        return
 
 
 def send_text(handler: SimpleHTTPRequestHandler, text: str, status: HTTPStatus = HTTPStatus.OK) -> None:
     body = text.encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "text/plain; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "text/plain; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+        return
 
 
 def normalize_task_payload(payload: dict) -> dict:
