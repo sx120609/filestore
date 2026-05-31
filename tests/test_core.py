@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import io
+import json
+import sqlite3
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -267,6 +270,59 @@ class TestNormalizeSiteUrl(unittest.TestCase):
             app.normalize_site_url("https://files.example.com"),
             "https://files.example.com",
         )
+
+
+class TestRerenameTaskFiles(unittest.TestCase):
+    def test_updates_database_and_disk_file(self):
+        old_root = app.ROOT
+        old_upload_dir = app.UPLOAD_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app.ROOT = root
+            app.UPLOAD_DIR = root / "uploads"
+            try:
+                task_dir = app.UPLOAD_DIR / "1"
+                task_dir.mkdir(parents=True)
+                source = task_dir / "1-old.pdf"
+                source.write_bytes(b"PDF")
+
+                conn = sqlite3.connect(":memory:")
+                conn.row_factory = sqlite3.Row
+                conn.executescript(
+                    """
+                    CREATE TABLE submissions (
+                        id INTEGER PRIMARY KEY,
+                        task_id INTEGER NOT NULL,
+                        data_json TEXT NOT NULL
+                    );
+                    CREATE TABLE files (
+                        id INTEGER PRIMARY KEY,
+                        submission_id INTEGER NOT NULL,
+                        original_name TEXT NOT NULL,
+                        stored_name TEXT NOT NULL,
+                        path TEXT NOT NULL
+                    );
+                    """
+                )
+                conn.execute(
+                    "INSERT INTO submissions (id, task_id, data_json) VALUES (?, ?, ?)",
+                    (1, 1, json.dumps({"name": "沈礼", "student_id": "2420150508"}, ensure_ascii=False)),
+                )
+                conn.execute(
+                    "INSERT INTO files (id, submission_id, original_name, stored_name, path) VALUES (?, ?, ?, ?, ?)",
+                    (1, 1, "中国药科大学实验报告(2).pdf", "08 沈礼.pdf", str(Path("uploads") / "1" / "1-old.pdf")),
+                )
+
+                result = app.rerename_task_files(conn, 1, "{name}-{student_id|last:2}")
+
+                row = conn.execute("SELECT stored_name, path FROM files WHERE id = 1").fetchone()
+                self.assertEqual(result, {"renamed": 1, "unchanged": 0, "missing": 0})
+                self.assertEqual(row["stored_name"], "沈礼-08.pdf")
+                self.assertFalse(source.exists())
+                self.assertTrue((task_dir / "1-沈礼-08.pdf").exists())
+            finally:
+                app.ROOT = old_root
+                app.UPLOAD_DIR = old_upload_dir
 
 
 def _build_multipart(boundary: bytes, parts: list[tuple[str, str | None, str, bytes]]) -> bytes:

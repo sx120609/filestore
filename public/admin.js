@@ -408,6 +408,7 @@ function editorPayload() {
     renameTemplate: $("#renameTemplate").value.trim(),
     folderTemplate: $("#folderTemplate").value.trim(),
     expectedEntries: $("#expectedEntries").value,
+    renameExistingFiles: state.mode === "edit" && $("#renameExistingFiles").checked,
   };
 }
 
@@ -437,6 +438,8 @@ function fillEditor(task) {
   $("#maxCount").value = task?.fileRules?.maxCount || 1;
   $("#renameTemplate").value = task?.renameTemplate || "{name}-{student_id}";
   $("#folderTemplate").value = task?.folderTemplate || "{name}-{student_id}";
+  $("#renameExistingFiles").checked = Boolean(task);
+  $("#renameExistingFiles").disabled = !task;
   $("#expectedEntries").value = task?.expectedEntries || "";
   setFields(task?.fields?.length ? task.fields : defaultFields());
   updateRenamePreview();
@@ -464,7 +467,11 @@ async function saveTask() {
     const path = state.mode === "edit" && state.current ? `/api/tasks/${state.current.id}` : "/api/tasks";
     const method = state.mode === "edit" ? "PATCH" : "POST";
     const task = await api(path, { method, body: JSON.stringify(payload) });
-    toast(state.mode === "edit" ? "任务已更新" : "任务已创建", "ok");
+    const renamed = task.renameResult?.renamed || 0;
+    const missing = task.renameResult?.missing || 0;
+    const renameNote = renamed ? `，已重命名 ${renamed} 个文件` : "";
+    const missingNote = missing ? `，${missing} 个文件缺失未处理` : "";
+    toast(`${state.mode === "edit" ? "任务已更新" : "任务已创建"}${renameNote}${missingNote}`, "ok");
     await loadTasks();
     await selectTask(task.id);
     closeEditor();

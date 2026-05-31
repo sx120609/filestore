@@ -739,6 +739,65 @@ def delete_submission_files(conn: sqlite3.Connection, submission_id: int) -> Non
             path.unlink()
 
 
+def rerename_task_files(conn: sqlite3.Connection, task_id: int, rename_template: str) -> dict:
+    rows = conn.execute(
+        """
+        SELECT
+            f.id,
+            f.submission_id,
+            f.original_name,
+            f.stored_name,
+            f.path,
+            s.data_json
+        FROM files f
+        JOIN submissions s ON s.id = f.submission_id
+        WHERE s.task_id = ?
+        ORDER BY f.submission_id ASC, f.id ASC
+        """,
+        (task_id,),
+    ).fetchall()
+
+    by_submission: dict[int, list[sqlite3.Row]] = {}
+    for row in rows:
+        by_submission.setdefault(row["submission_id"], []).append(row)
+
+    result = {"renamed": 0, "unchanged": 0, "missing": 0}
+    for submission_id, files in by_submission.items():
+        total_files = len(files)
+        data = json.loads(files[0]["data_json"]) if files else {}
+        for index, row in enumerate(files, start=1):
+            stored_name = render_name(rename_template, data, row["original_name"] or "file", index, total_files)
+            relative = Path("uploads") / str(task_id) / f"{submission_id}-{stored_name}"
+            source = (ROOT / row["path"]).resolve()
+            target = (ROOT / relative).resolve()
+            uploads_root = UPLOAD_DIR.resolve()
+            if uploads_root not in source.parents or uploads_root not in target.parents:
+                raise ValueError("重命名目标路径不安全")
+            if source == target and row["stored_name"] == stored_name:
+                result["unchanged"] += 1
+                continue
+            if source == target:
+                conn.execute(
+                    "UPDATE files SET stored_name = ?, path = ? WHERE id = ?",
+                    (stored_name, str(relative), row["id"]),
+                )
+                result["renamed"] += 1
+                continue
+            if source.exists():
+                if target.exists() and source != target:
+                    raise ValueError(f"目标文件已存在：{stored_name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.rename(target)
+                conn.execute(
+                    "UPDATE files SET stored_name = ?, path = ? WHERE id = ?",
+                    (stored_name, str(relative), row["id"]),
+                )
+                result["renamed"] += 1
+            else:
+                result["missing"] += 1
+    return result
+
+
 def submission_identity(data: dict) -> str:
     return str(data.get("student_id") or data.get("name") or "").strip()
 
@@ -1002,6 +1061,23 @@ class AppHandler(SimpleHTTPRequestHandler):
                 task_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             send_json(self, build_task_detail(task_id), HTTPStatus.CREATED)
             return
+        rerename_match = re.fullmatch(r"/api/tasks/(\d+)/rename-files", path)
+        if rerename_match:
+            if not require_admin(self):
+                return
+            task_id = int(rerename_match.group(1))
+            try:
+                with connect() as conn:
+                    row = conn.execute("SELECT rename_template FROM tasks WHERE id = ?", (task_id,)).fetchone()
+                    if not row:
+                        send_json(self, {"error": "任务不存在"}, HTTPStatus.NOT_FOUND)
+                        return
+                    result = rerename_task_files(conn, task_id, row["rename_template"])
+            except Exception as exc:
+                send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            send_json(self, {"ok": True, "result": result})
+            return
         match = re.fullmatch(r"/api/submit/([A-Za-z0-9_-]+)", path)
         if match:
             self.handle_submit(match.group(1))
@@ -1015,36 +1091,47 @@ class AppHandler(SimpleHTTPRequestHandler):
         task_match = re.fullmatch(r"/api/tasks/(\d+)", path)
         if task_match:
             try:
-                payload = normalize_task_payload(read_json_body(self))
+                raw_payload = read_json_body(self)
+                payload = normalize_task_payload(raw_payload)
             except Exception as exc:
                 send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             task_id = int(task_match.group(1))
-            with connect() as conn:
-                cursor = conn.execute(
-                    """
-                    UPDATE tasks
-                    SET title = ?, description = ?, deadline = ?, fields_json = ?,
-                        file_rules_json = ?, rename_template = ?, folder_template = ?, expected_entries = ?, status = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        payload["title"],
-                        payload["description"],
-                        payload["deadline"],
-                        json.dumps(payload["fields"], ensure_ascii=False),
-                        json.dumps(payload["fileRules"], ensure_ascii=False),
-                        payload["renameTemplate"],
-                        payload["folderTemplate"],
-                        payload["expectedEntries"],
-                        payload["status"],
-                        task_id,
-                    ),
-                )
+            rename_result = None
+            try:
+                with connect() as conn:
+                    cursor = conn.execute(
+                        """
+                        UPDATE tasks
+                        SET title = ?, description = ?, deadline = ?, fields_json = ?,
+                            file_rules_json = ?, rename_template = ?, folder_template = ?, expected_entries = ?, status = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            payload["title"],
+                            payload["description"],
+                            payload["deadline"],
+                            json.dumps(payload["fields"], ensure_ascii=False),
+                            json.dumps(payload["fileRules"], ensure_ascii=False),
+                            payload["renameTemplate"],
+                            payload["folderTemplate"],
+                            payload["expectedEntries"],
+                            payload["status"],
+                            task_id,
+                        ),
+                    )
+                    if cursor.rowcount and raw_payload.get("renameExistingFiles"):
+                        rename_result = rerename_task_files(conn, task_id, payload["renameTemplate"])
+            except Exception as exc:
+                send_json(self, {"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if cursor.rowcount == 0:
                 send_json(self, {"error": "任务不存在"}, HTTPStatus.NOT_FOUND)
                 return
-            send_json(self, build_task_detail(task_id))
+            detail = build_task_detail(task_id)
+            if detail and rename_result is not None:
+                detail["renameResult"] = rename_result
+            send_json(self, detail)
             return
 
         send_json(self, {"error": "接口不存在"}, HTTPStatus.NOT_FOUND)
